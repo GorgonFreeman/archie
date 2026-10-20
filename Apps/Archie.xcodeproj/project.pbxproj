@@ -1,0 +1,303 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		84597DCB98DE403F84AE2E3E /* ArchieApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10CD2050668D4CACB95C248A /* ArchieApp.swift */; };
+		F2901203BEE7495C8CC6C9B6 /* DeletionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D56D4310F8D41C4A0D690AE /* DeletionService.swift */; };
+		FFD2426EC33B45C0B55817AB /* ImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CDA896BA28C45829C3A353D /* ImportCoordinator.swift */; };
+		9E72BA256B0347CE9CA3EDBC /* ImportModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB5D2B4E9BEC4152BD6C4F4B /* ImportModels.swift */; };
+		7A3D7004B1E34C468C7DE4DE /* PhotoAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14E7841969014AD49A2502D1 /* PhotoAccess.swift */; };
+		977790B9B36545759007F425 /* ProtectionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C18190B6BC34EFFAB0D9083 /* ProtectionPolicy.swift */; };
+		8571D92031B548FCB932EEE5 /* ResourceExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E178202B71A4EC08C40A0C7 /* ResourceExporter.swift */; };
+		86EC13833B334C5BA193E1EB /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C76DEFF2DC564D65A6F28E9C /* RootView.swift */; };
+		4DD70B35447641D3A64462AF /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94867AE77B484BCD9B97BC80 /* SettingsStore.swift */; };
+		556A130C637B4EF7B7CD0F95 /* SidecarBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 809A64DFCA264E7FB66BBC5C /* SidecarBuilder.swift */; };
+		5944107D591C413DAA488241 /* ArchiveLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671A6879E476482185F4F541 /* ArchiveLayout.swift */; };
+		297C570AC37C478D9CA8C8CF /* AtomicWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D4077446971493FB4CB5D1B /* AtomicWriter.swift */; };
+		8A76F24CF83A44BCABFFCE2C /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1409DC0405A24831BB69E4CF /* Constants.swift */; };
+		E1E0B7C3372E4ABC80F25BA7 /* FrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7742DE7F7A344A0E93DBEDEE /* FrameCodec.swift */; };
+		27C7984C5B8E4CE1900894BA /* Manifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = F417704E30634F9DA5DA7CC4 /* Manifest.swift */; };
+		B72051C988184E258F7B468C /* Message.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64D4E682BD7641E1A088072A /* Message.swift */; };
+		E8B8F7EDFF174E06997D64AE /* Sha256Hasher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05398B4277B84C26B95392AB /* Sha256Hasher.swift */; };
+		6B049F24CA564375B6129B1F /* Sidecar.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEC691065C4F4B08B0A04F66 /* Sidecar.swift */; };
+		AE1D7D5BCE5F459AAC0BFF71 /* TransferClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD42A2C3DA794FA19CBFF66C /* TransferClient.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		10CD2050668D4CACB95C248A /* ArchieApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchieApp.swift; sourceTree = "<group>"; };
+		0D56D4310F8D41C4A0D690AE /* DeletionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeletionService.swift; sourceTree = "<group>"; };
+		1CDA896BA28C45829C3A353D /* ImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportCoordinator.swift; sourceTree = "<group>"; };
+		DB5D2B4E9BEC4152BD6C4F4B /* ImportModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportModels.swift; sourceTree = "<group>"; };
+		14E7841969014AD49A2502D1 /* PhotoAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoAccess.swift; sourceTree = "<group>"; };
+		9C18190B6BC34EFFAB0D9083 /* ProtectionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionPolicy.swift; sourceTree = "<group>"; };
+		0E178202B71A4EC08C40A0C7 /* ResourceExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceExporter.swift; sourceTree = "<group>"; };
+		C76DEFF2DC564D65A6F28E9C /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		94867AE77B484BCD9B97BC80 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		809A64DFCA264E7FB66BBC5C /* SidecarBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidecarBuilder.swift; sourceTree = "<group>"; };
+		671A6879E476482185F4F541 /* ArchiveLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ArchiveLayout.swift; path = ../Sources/ArchieCore/ArchiveLayout.swift; sourceTree = "<group>"; };
+		7D4077446971493FB4CB5D1B /* AtomicWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AtomicWriter.swift; path = ../Sources/ArchieCore/AtomicWriter.swift; sourceTree = "<group>"; };
+		1409DC0405A24831BB69E4CF /* Constants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Constants.swift; path = ../Sources/ArchieCore/Constants.swift; sourceTree = "<group>"; };
+		7742DE7F7A344A0E93DBEDEE /* FrameCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FrameCodec.swift; path = ../Sources/ArchieCore/FrameCodec.swift; sourceTree = "<group>"; };
+		F417704E30634F9DA5DA7CC4 /* Manifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Manifest.swift; path = ../Sources/ArchieCore/Manifest.swift; sourceTree = "<group>"; };
+		64D4E682BD7641E1A088072A /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Message.swift; path = ../Sources/ArchieCore/Message.swift; sourceTree = "<group>"; };
+		05398B4277B84C26B95392AB /* Sha256Hasher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Sha256Hasher.swift; path = ../Sources/ArchieCore/Sha256Hasher.swift; sourceTree = "<group>"; };
+		BEC691065C4F4B08B0A04F66 /* Sidecar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Sidecar.swift; path = ../Sources/ArchieCore/Sidecar.swift; sourceTree = "<group>"; };
+		DD42A2C3DA794FA19CBFF66C /* TransferClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TransferClient.swift; path = ../Sources/ArchieCore/TransferClient.swift; sourceTree = "<group>"; };
+		B39A3B5D4FAC48C798377BCB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8B68843FAB5E4DB99315FF2B /* Archie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Archie.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		19FE87F3E7344FB7BC81E816 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		28C3C21249634E8F8B89EE6B = {
+			isa = PBXGroup;
+			children = (
+				77464D7564824F70A26BA04F /* Archie */,
+				6D16FFE0EA2248D280F44242 /* ArchieCore */,
+				F538FD09BEA34B189C390A82 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F538FD09BEA34B189C390A82 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8B68843FAB5E4DB99315FF2B /* Archie.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		77464D7564824F70A26BA04F /* Archie */ = {
+			isa = PBXGroup;
+			children = (
+				10CD2050668D4CACB95C248A /* ArchieApp.swift */,
+				0D56D4310F8D41C4A0D690AE /* DeletionService.swift */,
+				1CDA896BA28C45829C3A353D /* ImportCoordinator.swift */,
+				DB5D2B4E9BEC4152BD6C4F4B /* ImportModels.swift */,
+				14E7841969014AD49A2502D1 /* PhotoAccess.swift */,
+				9C18190B6BC34EFFAB0D9083 /* ProtectionPolicy.swift */,
+				0E178202B71A4EC08C40A0C7 /* ResourceExporter.swift */,
+				C76DEFF2DC564D65A6F28E9C /* RootView.swift */,
+				94867AE77B484BCD9B97BC80 /* SettingsStore.swift */,
+				809A64DFCA264E7FB66BBC5C /* SidecarBuilder.swift */,
+				B39A3B5D4FAC48C798377BCB /* Info.plist */,
+			);
+			path = Archie;
+			sourceTree = "<group>";
+		};
+		6D16FFE0EA2248D280F44242 /* ArchieCore */ = {
+			isa = PBXGroup;
+			children = (
+				671A6879E476482185F4F541 /* ArchiveLayout.swift */,
+				7D4077446971493FB4CB5D1B /* AtomicWriter.swift */,
+				1409DC0405A24831BB69E4CF /* Constants.swift */,
+				7742DE7F7A344A0E93DBEDEE /* FrameCodec.swift */,
+				F417704E30634F9DA5DA7CC4 /* Manifest.swift */,
+				64D4E682BD7641E1A088072A /* Message.swift */,
+				05398B4277B84C26B95392AB /* Sha256Hasher.swift */,
+				BEC691065C4F4B08B0A04F66 /* Sidecar.swift */,
+				DD42A2C3DA794FA19CBFF66C /* TransferClient.swift */,
+			);
+			name = ArchieCore;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		6319F3F0AC5B47EB820CABCC /* Archie */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 18D66169C4C0422DBA8E080B /* Build configuration list for PBXNativeTarget "Archie" */;
+			buildPhases = (
+				BA62C10110AF4191BB5A8741 /* Sources */,
+				19FE87F3E7344FB7BC81E816 /* Frameworks */,
+				4D613EB275E346B0A5709A9C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Archie;
+			productName = Archie;
+			productReference = 8B68843FAB5E4DB99315FF2B /* Archie.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D762F348306A4DB298513CFF /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1540;
+				LastUpgradeCheck = 1540;
+			};
+			buildConfigurationList = 39F4404D0D214C37B4C02F66 /* Build configuration list for PBXProject "Archie" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 28C3C21249634E8F8B89EE6B;
+			productRefGroup = F538FD09BEA34B189C390A82 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				6319F3F0AC5B47EB820CABCC /* Archie */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4D613EB275E346B0A5709A9C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		BA62C10110AF4191BB5A8741 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				84597DCB98DE403F84AE2E3E /* ArchieApp.swift in Sources */,
+				F2901203BEE7495C8CC6C9B6 /* DeletionService.swift in Sources */,
+				FFD2426EC33B45C0B55817AB /* ImportCoordinator.swift in Sources */,
+				9E72BA256B0347CE9CA3EDBC /* ImportModels.swift in Sources */,
+				7A3D7004B1E34C468C7DE4DE /* PhotoAccess.swift in Sources */,
+				977790B9B36545759007F425 /* ProtectionPolicy.swift in Sources */,
+				8571D92031B548FCB932EEE5 /* ResourceExporter.swift in Sources */,
+				86EC13833B334C5BA193E1EB /* RootView.swift in Sources */,
+				4DD70B35447641D3A64462AF /* SettingsStore.swift in Sources */,
+				556A130C637B4EF7B7CD0F95 /* SidecarBuilder.swift in Sources */,
+				5944107D591C413DAA488241 /* ArchiveLayout.swift in Sources */,
+				297C570AC37C478D9CA8C8CF /* AtomicWriter.swift in Sources */,
+				8A76F24CF83A44BCABFFCE2C /* Constants.swift in Sources */,
+				E1E0B7C3372E4ABC80F25BA7 /* FrameCodec.swift in Sources */,
+				27C7984C5B8E4CE1900894BA /* Manifest.swift in Sources */,
+				B72051C988184E258F7B468C /* Message.swift in Sources */,
+				E8B8F7EDFF174E06997D64AE /* Sha256Hasher.swift in Sources */,
+				6B049F24CA564375B6129B1F /* Sidecar.swift in Sources */,
+				AE1D7D5BCE5F459AAC0BFF71 /* TransferClient.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		370D5E3BFF274122878C76A7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				ENABLE_TESTABILITY = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+			};
+			name = Debug;
+		};
+		A7A9E403FA794CDC94200461 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+			};
+			name = Release;
+		};
+		E672AD5B73CF4F2D8CB4E31A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Archie/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.manuscanis.archie;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		27F5A32E508F424BB49536DB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Archie/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.manuscanis.archie;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		39F4404D0D214C37B4C02F66 /* Build configuration list for PBXProject "Archie" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				370D5E3BFF274122878C76A7 /* Debug */,
+				A7A9E403FA794CDC94200461 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		18D66169C4C0422DBA8E080B /* Build configuration list for PBXNativeTarget "Archie" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E672AD5B73CF4F2D8CB4E31A /* Debug */,
+				27F5A32E508F424BB49536DB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = D762F348306A4DB298513CFF /* Project object */;
+}
