@@ -10,12 +10,16 @@ let package = Package(
     products: [
         .library(name: "ArchieCore", targets: ["ArchieCore"]),
         .executable(name: "archie-receiver", targets: ["ArchieReceiver"]),
+        .executable(name: "archie-menubar", targets: ["ArchieMenuBar"]),
     ],
     targets: [
         .target(name: "ArchieCore"),
         .executableTarget(
             name: "ArchieReceiver",
             dependencies: ["ArchieCore"]
+        ),
+        .executableTarget(
+            name: "ArchieMenuBar"
         ),
         .testTarget(
             name: "ArchieCoreTests",

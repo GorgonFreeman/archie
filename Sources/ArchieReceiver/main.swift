@@ -12,9 +12,14 @@ TmpCleanup.clean(archiveRoot: archiveRoot)
 
 let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
     .appendingPathComponent("Archie", isDirectory: true)
+try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
 let identity = try TLSIdentity.loadOrCreate(in: support)
 let pin = Pairing.makePin()
 let manifest = try ManifestStore(archiveRoot: archiveRoot)
+
+// For the USB watch LaunchAgent / UI — one-line PIN file.
+let pinFile = support.appendingPathComponent("current_pin.txt")
+try? pin.write(to: pinFile, atomically: true, encoding: .utf8)
 
 fputs("Archie receiver\n", stderr)
 fputs("archive: \(archiveRoot.path)\n", stderr)
