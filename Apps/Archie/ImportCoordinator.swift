@@ -44,6 +44,7 @@ final class ImportCoordinator: ObservableObject {
         let opts = PHFetchOptions()
         opts.includeHiddenAssets = true
         opts.includeAllBurstAssets = true
+        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
         let fetch = PHAsset.fetchAssets(with: opts)
         total = fetch.count
         progress = 0
