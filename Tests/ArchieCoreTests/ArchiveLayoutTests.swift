@@ -2,32 +2,26 @@ import ArchieCore
 import XCTest
 
 final class ArchiveLayoutTests: XCTestCase {
-    func testUniqueURLUsesYearMonth() throws {
+    func testUniqueURLIsFlat() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("archie-test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
-        var comps = DateComponents()
-        comps.year = 2024
-        comps.month = 3
-        comps.day = 15
-        let date = Calendar.current.date(from: comps)!
-
         let first = ArchiveLayout.uniqueURL(
             archiveRoot: root,
             originalFilename: "IMG.HEIC",
-            creationDate: date
+            creationDate: Date()
         )
-        XCTAssertEqual(first.relativePath, "2024/03/IMG.HEIC")
+        XCTAssertEqual(first.relativePath, "IMG.HEIC")
         try Data([1]).write(to: first.url)
 
         let second = ArchiveLayout.uniqueURL(
             archiveRoot: root,
             originalFilename: "IMG.HEIC",
-            creationDate: date
+            creationDate: Date()
         )
-        XCTAssertEqual(second.relativePath, "2024/03/IMG-1.HEIC")
+        XCTAssertEqual(second.relativePath, "IMG-1.HEIC")
     }
 
     func testAtomicWriterRoundTrip() throws {
