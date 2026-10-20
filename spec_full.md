@@ -81,11 +81,11 @@ An asset is **eligible** only if all of the following hold:
 - It is not protected, evaluated **fresh at delete time** (favourite flag and album membership re-read from PhotoKit).
 - Photos authorization is **full access**. Under limited access, the app never deletes.
 
-Eligible assets are deleted with `PHAssetChangeRequest.deleteAssets`, in batches (one iOS confirmation prompt per batch, which cannot be suppressed). Deleted items go to Recently Deleted for 30 days.
+Eligible assets are deleted with `PHAssetChangeRequest.deleteAssets` **as each asset finishes verify** (one iOS confirmation prompt per delete call, which cannot be suppressed). Deleted items go to Recently Deleted for 30 days.
 
-Before deleting, the app shows a summary: assets and bytes to delete, assets retained (and why: protected, failed, unreadable). Deletion is a separate button after the import finishes, not automatic.
+Deletion is gated by a `VerifiedCopy` proof type that can only be built when every media resource and the sidecar have a Mac RECEIPT whose hash and size match what the phone sent. No proof → no delete. Protection and full-access checks run fresh immediately before each delete. A disconnect, crash, failed transfer, or declined Photos prompt leaves that asset on the phone.
 
-After each batch, the app re-fetches to confirm what actually disappeared. A disconnect, crash, or error leaves everything in an undeleted state. No receipt on record means no deletion.
+The UI reports running counts of imported, verified, deleted, retained (and why: protected, failed, unreadable, sidecar failed, limited access, delete declined).
 
 ## Protocol
 
@@ -119,5 +119,5 @@ After each batch, the app re-fetches to confirm what actually disappeared. A dis
 1. **Spike (1 day):** PhotoKit enumeration of a test library on a real phone. Export resources, check protection logic, delete a test asset and confirm it lands in Recently Deleted. Dump every metadata field PhotoKit returns for a sample of assets (including edited-location ones) to settle the sidecar schema, and check whether anything about people or scenes is exposed.
 2. **Mac receiver and protocol:** hashing, atomic writes, receipts, manifest. No deletion yet.
 3. **Phone import loop and verification.** Test with interrupted transfers.
-4. **Deletion, summary screen, and settings.** Test against the acceptance criteria on a throwaway library first.
+4. **Delete-as-you-go, summary counts, and settings.** Test against the acceptance criteria on a throwaway library first.
 5. **Run on the real library** in stages, with a Mac backup in place.

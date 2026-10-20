@@ -6,7 +6,6 @@ struct RootView: View {
     @StateObject private var importer: ImportCoordinator
     @State private var pin = ""
     @State private var albums: [PHAssetCollection] = []
-    @State private var deleteMessage: String?
 
     init() {
         let settings = SettingsStore()
@@ -30,6 +29,9 @@ struct RootView: View {
                     if importer.total > 0 {
                         ProgressView(value: Double(importer.progress), total: Double(importer.total))
                     }
+                    Text("Each asset is deleted only after every resource and its sidecar have matching Mac receipts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Protection") {
@@ -45,46 +47,16 @@ struct RootView: View {
                 Section("Summary") {
                     LabeledContent("Imported", value: "\(importer.summary.imported)")
                     LabeledContent("Verified", value: "\(importer.summary.verified)")
-                    LabeledContent("Failed", value: "\(importer.summary.failed)")
-                    LabeledContent("Retained", value: "\(importer.summary.retained)")
                     LabeledContent("Deleted", value: "\(importer.summary.deleted)")
+                    LabeledContent("Retained", value: "\(importer.summary.retained)")
+                    LabeledContent("Failed", value: "\(importer.summary.failed)")
                     LabeledContent("Bytes verified", value: ByteCountFormatter.string(
                         fromByteCount: importer.summary.bytesVerified,
                         countStyle: .file
                     ))
-                }
-
-                if !importer.summary.eligibleForDelete.isEmpty {
-                    Section("Deletion") {
-                        Text(
-                            "\(importer.summary.eligibleForDelete.count) verified assets "
-                                + "(\(ByteCountFormatter.string(fromByteCount: importer.summary.eligibleForDelete.reduce(0) { $0 + $1.bytes }, countStyle: .file))). "
-                                + "Favourites/albums are re-checked at delete time."
-                        )
-                        if !PhotoAccess.canDelete {
-                            Text("Full Photos access required to delete.")
-                                .foregroundStyle(.red)
-                        }
-                        Button("Delete verified from iPhone", role: .destructive) {
-                            Task {
-                                do {
-                                    let n = try await DeletionService.deleteEligible(
-                                        outcomes: importer.summary.outcomes,
-                                        settings: settings
-                                    )
-                                    var next = importer.summary
-                                    next.deleted = n
-                                    importer.summary = next
-                                    deleteMessage = "Deleted \(n)"
-                                } catch {
-                                    deleteMessage = error.localizedDescription
-                                }
-                            }
-                        }
-                        .disabled(!PhotoAccess.canDelete || importer.isRunning)
-                        if let deleteMessage {
-                            Text(deleteMessage)
-                        }
+                    if !PhotoAccess.canDelete {
+                        Text("Full Photos access required to delete — imports still run.")
+                            .foregroundStyle(.red)
                     }
                 }
 

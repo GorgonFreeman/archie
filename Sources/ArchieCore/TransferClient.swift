@@ -47,7 +47,14 @@ public final class TransferClient: @unchecked Sendable {
         let (type, payload) = try await io.receive()
         switch type {
         case .receipt:
-            return try MessageCodec.decode(ReceiptPayload.self, from: payload)
+            let receipt = try MessageCodec.decode(ReceiptPayload.self, from: payload)
+            // Phone-side gate: never treat a mismatched receipt as success.
+            guard receipt.sha256.lowercased() == begin.declaredSha256.lowercased(),
+                  receipt.size == begin.size,
+                  !receipt.relativePath.isEmpty else {
+                throw TransferError.protocolError("receipt does not match declared hash/size")
+            }
+            return receipt
         case .fail:
             let fail = try MessageCodec.decode(FailPayload.self, from: payload)
             throw TransferError.rejected(fail.reason)

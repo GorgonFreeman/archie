@@ -1,50 +1,50 @@
 import Photos
 
+enum DeleteResult: Sendable {
+    case deleted
+    case retained(RetainReason)
+}
+
 enum DeletionService {
-    /// Re-evaluates protection fresh, requires full Photos access.
+    /// Deletes only a `VerifiedCopy` (all resources + sidecar receipt-matched).
+    /// Re-reads protection and requires full Photos access.
     @MainActor
-    static func deleteEligible(
-        outcomes: [AssetOutcome],
-        settings: SettingsStore,
-        batchSize: Int = 40
-    ) async throws -> Int {
+    static func deleteVerified(
+        _ copy: VerifiedCopy,
+        settings: SettingsStore
+    ) async -> DeleteResult {
+        // Belt: refuse anything that somehow lacks a sidecar receipt.
+        guard copy.receipts.contains(where: { $0.type == "sidecar" }) else {
+            return .retained(.sidecarFailed)
+        }
         guard PhotoAccess.canDelete else {
-            throw DeleteError.limitedAccess
+            return .retained(.limitedAccess)
+        }
+
+        let fetch = PHAsset.fetchAssets(withLocalIdentifiers: [copy.assetId], options: nil)
+        guard let asset = fetch.firstObject else {
+            // Already gone — treat as success (nothing left to delete).
+            return .deleted
         }
 
         let policy = ProtectionPolicy(
             protectFavourites: settings.protectFavourites,
             protectedAlbumIds: Set(settings.protectedAlbumIds)
         )
-
-        var toDelete: [PHAsset] = []
-        for outcome in outcomes where outcome.verified && outcome.retainReason == nil {
-            let fetch = PHAsset.fetchAssets(withLocalIdentifiers: [outcome.id], options: nil)
-            guard let asset = fetch.firstObject else { continue }
-            let albums = ProtectionPolicy.albumIds(containing: asset)
-            if policy.isProtected(asset, albumIds: albums) { continue }
-            toDelete.append(asset)
+        let albums = ProtectionPolicy.albumIds(containing: asset)
+        if policy.isProtected(asset, albumIds: albums) {
+            return .retained(.protected)
         }
 
-        var deleted = 0
-        for batchStart in stride(from: 0, to: toDelete.count, by: batchSize) {
-            let end = min(batchStart + batchSize, toDelete.count)
-            let batch = Array(toDelete[batchStart..<end])
-            let ids = batch.map(\.localIdentifier)
+        do {
             try await PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.deleteAssets(batch as NSArray)
+                PHAssetChangeRequest.deleteAssets([asset] as NSArray)
             }
-            let still = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
-            deleted += batch.count - still.count
+        } catch {
+            return .retained(.deleteDeclined)
         }
-        return deleted
-    }
-}
 
-enum DeleteError: Error, LocalizedError {
-    case limitedAccess
-
-    var errorDescription: String? {
-        "Full Photos access required to delete"
+        let still = PHAsset.fetchAssets(withLocalIdentifiers: [copy.assetId], options: nil)
+        return still.count == 0 ? .deleted : .retained(.deleteDeclined)
     }
 }

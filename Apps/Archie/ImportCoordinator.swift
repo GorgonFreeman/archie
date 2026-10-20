@@ -54,7 +54,7 @@ final class ImportCoordinator: ObservableObject {
         for asset in assets {
             progress += 1
             status = "Asset \(progress)/\(total)"
-            let outcome = await transferAsset(asset, client: client)
+            let outcome = await transferVerifyDelete(asset, client: client)
             summary.outcomes.append(outcome)
             summary.imported += 1
             if outcome.verified {
@@ -62,42 +62,78 @@ final class ImportCoordinator: ObservableObject {
                 summary.bytesVerified += outcome.bytes
             } else {
                 summary.failed += 1
+            }
+            if outcome.deleted {
+                summary.deleted += 1
+            } else {
                 summary.retained += 1
             }
         }
 
         try? await client.endSession()
-        status = "Import finished"
+        status = "Finished — deleted \(summary.deleted), retained \(summary.retained)"
     }
 
-    private func transferAsset(
+    /// Transfer → require matching receipts for every resource + sidecar → then maybe delete.
+    private func transferVerifyDelete(
         _ asset: PHAsset,
         client: TransferClient
     ) async -> AssetOutcome {
+        switch await transferVerified(asset, client: client) {
+        case .failure(let reason, let bytes):
+            return AssetOutcome(
+                id: asset.localIdentifier,
+                bytes: bytes,
+                verified: false,
+                deleted: false,
+                retainReason: reason
+            )
+        case .success(let copy):
+            // Delete only via VerifiedCopy — never a bare asset id / bool.
+            switch await DeletionService.deleteVerified(copy, settings: settings) {
+            case .deleted:
+                return AssetOutcome(
+                    id: copy.assetId,
+                    bytes: copy.bytes,
+                    verified: true,
+                    deleted: true,
+                    retainReason: nil
+                )
+            case .retained(let reason):
+                return AssetOutcome(
+                    id: copy.assetId,
+                    bytes: copy.bytes,
+                    verified: true,
+                    deleted: false,
+                    retainReason: reason
+                )
+            }
+        }
+    }
+
+    private enum TransferResult {
+        case success(VerifiedCopy)
+        case failure(RetainReason, bytes: Int64)
+    }
+
+    /// Returns `VerifiedCopy` only when every media resource and the sidecar have matching RECEIPTs.
+    private func transferVerified(
+        _ asset: PHAsset,
+        client: TransferClient
+    ) async -> TransferResult {
         let exported: [ExportedResource]
         do {
             exported = try await ResourceExporter.exportAll(for: asset)
         } catch {
-            return AssetOutcome(
-                id: asset.localIdentifier,
-                bytes: 0,
-                verified: false,
-                retainReason: .unreadable
-            )
+            return .failure(.unreadable, bytes: 0)
         }
-
         guard !exported.isEmpty else {
-            return AssetOutcome(
-                id: asset.localIdentifier,
-                bytes: 0,
-                verified: false,
-                retainReason: .unreadable
-            )
+            return .failure(.unreadable, bytes: 0)
         }
 
-        var sidecarResources: [SidecarResource] = []
+        var matched: [MatchedReceipt] = []
         var bytes: Int64 = 0
-        var allOk = true
+        var sidecarResources: [SidecarResource] = []
 
         for resource in exported {
             defer { try? FileManager.default.removeItem(at: resource.fileURL) }
@@ -111,34 +147,34 @@ final class ImportCoordinator: ObservableObject {
             )
             do {
                 let receipt = try await sendWithRetry(client: client, begin: begin, file: resource.fileURL)
+                matched.append(MatchedReceipt(
+                    type: resource.typeName,
+                    originalFilename: resource.originalFilename,
+                    size: receipt.size,
+                    sha256: receipt.sha256,
+                    relativePath: receipt.relativePath
+                ))
                 sidecarResources.append(SidecarResource(
                     type: resource.typeName,
                     originalFilename: resource.originalFilename,
-                    size: resource.size,
-                    sha256: resource.sha256,
+                    size: receipt.size,
+                    sha256: receipt.sha256,
                     relativePath: receipt.relativePath
                 ))
-                bytes += resource.size
+                bytes += receipt.size
             } catch {
-                allOk = false
-                break
+                return .failure(.failed, bytes: bytes)
             }
         }
 
-        guard allOk else {
-            return AssetOutcome(
-                id: asset.localIdentifier,
-                bytes: bytes,
-                verified: false,
-                retainReason: .failed
-            )
-        }
-
+        // Sidecar is mandatory — no VerifiedCopy without its receipt.
         let doc = SidecarBuilder.build(asset: asset, resources: sidecarResources)
         let primaryName = exported.first?.originalFilename ?? "asset"
         let sidecarName = "\(primaryName).asset.json"
         let sidecarURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("archie-sidecar-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: sidecarURL) }
+
         do {
             let data = try MessageCodec.encode(doc)
             try data.write(to: sidecarURL)
@@ -154,25 +190,26 @@ final class ImportCoordinator: ObservableObject {
                 declaredSha256: digest,
                 isSidecar: true
             )
-            _ = try await sendWithRetry(client: client, begin: begin, file: sidecarURL)
-            try? FileManager.default.removeItem(at: sidecarURL)
+            let receipt = try await sendWithRetry(client: client, begin: begin, file: sidecarURL)
+            matched.append(MatchedReceipt(
+                type: "sidecar",
+                originalFilename: sidecarName,
+                size: receipt.size,
+                sha256: receipt.sha256,
+                relativePath: receipt.relativePath
+            ))
         } catch {
-            try? FileManager.default.removeItem(at: sidecarURL)
-            return AssetOutcome(
-                id: asset.localIdentifier,
-                bytes: bytes,
-                verified: false,
-                retainReason: .sidecarFailed
-            )
+            return .failure(.sidecarFailed, bytes: bytes)
         }
 
-        // Protection is re-evaluated at delete time (spec).
-        return AssetOutcome(
-            id: asset.localIdentifier,
-            bytes: bytes,
-            verified: true,
-            retainReason: nil
-        )
+        guard let copy = VerifiedCopy.make(
+            assetId: asset.localIdentifier,
+            expectedMediaCount: exported.count,
+            receipts: matched
+        ) else {
+            return .failure(.failed, bytes: bytes)
+        }
+        return .success(copy)
     }
 
     private func sendWithRetry(
@@ -183,8 +220,7 @@ final class ImportCoordinator: ObservableObject {
         var last: Error = TransferError.protocolError("no attempt")
         for _ in 0..<ArchieConstants.maxAttempts {
             do {
-                let stream = fileChunkStream(file)
-                return try await client.sendResource(begin: begin, bytes: stream)
+                return try await client.sendResource(begin: begin, bytes: fileChunkStream(file))
             } catch {
                 last = error
             }
