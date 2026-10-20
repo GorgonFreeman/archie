@@ -27,15 +27,17 @@ Also installs a **menu bar** app: click **Archie** for the PIN (and Copy). While
 
 Override archive path with `ARCHIE_ARCHIVE=/path ./scripts/install_launch_agent.sh`.
 
-### Date-rename with chive (keeps sidecars paired)
+### Date names
 
-After a run (or on an existing flat archive), park sidecars, rename media, restore `*.asset.json`:
+During import the Mac renames each verified asset to `YYYY-MM-DD_HHhMMmSSs` (one date for all resources) before acknowledging settle; the phone deletes only after that ack.
+
+For an existing backlog of raw `IMG_…` names (stop the receiver first, or wait until it is idle):
 
 ```bash
 node scripts/chive_archive.js ~/Pictures/ArchieArchive
 ```
 
-Uses each sidecar’s PhotoKit `creationDate` when present; otherwise runs sibling `chive/renamer.js`. Pass `--chive /path/to/renamer.js` if chive isn’t next to this repo.
+Takes the same `.archie-archive.lock` as live settle. Uses each sidecar’s PhotoKit `creationDate` when present; otherwise runs sibling `chive/renamer.js`. Pass `--chive /path/to/renamer.js` if chive isn’t next to this repo.
 
 ## iOS app
 

@@ -109,7 +109,19 @@ final class ImportCoordinator: ObservableObject {
                 retainReason: reason
             )
         case .success(let copy):
-            // Delete only via VerifiedCopy — never a bare asset id / bool.
+            // Rename-as-we-go must succeed before delete (settle ack).
+            do {
+                _ = try await client.settleAsset(assetId: copy.assetId)
+            } catch {
+                return AssetOutcome(
+                    id: copy.assetId,
+                    bytes: copy.bytes,
+                    verified: true,
+                    deleted: false,
+                    retainReason: .settleFailed
+                )
+            }
+
             switch await DeletionService.deleteVerified(copy, settings: settings) {
             case .deleted:
                 return AssetOutcome(

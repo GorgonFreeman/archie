@@ -22,7 +22,8 @@ const PARK_DIR_NAME = '.archie-sidecar-park';
 const TMP_DIR_NAME = '.archie-tmp';
 const MANIFEST_NAME = 'manifest.jsonl';
 const CHIVE_LOG_NAME = 'chive_rename_log.tsv';
-const SKIP_NAMES = new Set([MANIFEST_NAME, CHIVE_LOG_NAME, '.DS_Store']);
+const ARCHIVE_LOCK_NAME = '.archie-archive.lock';
+const SKIP_NAMES = new Set([MANIFEST_NAME, CHIVE_LOG_NAME, '.DS_Store', ARCHIVE_LOCK_NAME]);
 
 const rawArgs = process.argv.slice(2);
 const force = rawArgs.includes('--force');
@@ -465,33 +466,69 @@ function verifyArchive() {
   return { sidecars, media, issues };
 }
 
-console.log('snapshotting media hashes…');
-const beforeHashes = snapshotMediaHashes();
-console.log('media files', [...beforeHashes.values()].reduce((a, b) => a + b, 0));
-
-parkAllSidecars();
-flattenMediaToRoot();
-renameFromSidecarDates();
-const logPath = runChive();
-ingestChiveLog(logPath);
-const sidecarFailures = unparkSidecars();
-patchManifest();
-cleanupParkDir();
-
-console.log('verifying…');
-const afterHashes = snapshotMediaHashes();
-if (!hashesEqual(beforeHashes, afterHashes)) {
-  console.error('DATA ISSUE: media sha256 multiset changed (content altered or file lost/gained)');
-  process.exit(2);
+function acquireArchiveLock() {
+  const lockPath = path.join(archiveRoot, ARCHIVE_LOCK_NAME);
+  if (fs.existsSync(lockPath)) {
+    const raw = fs.readFileSync(lockPath, 'utf8').trim();
+    const pid = Number(raw);
+    if (pid > 0) {
+      try {
+        process.kill(pid, 0);
+        console.error('archive locked by pid', pid, '— stop the receiver or wait');
+        process.exit(4);
+      } catch {
+        fs.unlinkSync(lockPath);
+      }
+    } else {
+      fs.unlinkSync(lockPath);
+    }
+  }
+  fs.writeFileSync(lockPath, String(process.pid));
+  return lockPath;
 }
-console.log('media hashes unchanged ✓');
 
-const { sidecars, media, issues } = verifyArchive();
-console.log('counts', { sidecars, media, renames: renames.size });
-if (sidecarFailures || issues.length) {
-  console.error('DATA ISSUES:');
-  for (const issue of issues.slice(0, 50)) console.error(' -', issue);
-  if (issues.length > 50) console.error(` … and ${ issues.length - 50 } more`);
-  process.exit(3);
+function releaseArchiveLock(lockPath) {
+  try {
+    if (fs.existsSync(lockPath) && fs.readFileSync(lockPath, 'utf8').trim() === String(process.pid)) {
+      fs.unlinkSync(lockPath);
+    }
+  } catch {
+    // ignore
+  }
 }
-console.log('done — archive OK');
+
+const lockPath = acquireArchiveLock();
+try {
+  console.log('snapshotting media hashes…');
+  const beforeHashes = snapshotMediaHashes();
+  console.log('media files', [...beforeHashes.values()].reduce((a, b) => a + b, 0));
+
+  parkAllSidecars();
+  flattenMediaToRoot();
+  renameFromSidecarDates();
+  const logPath = runChive();
+  ingestChiveLog(logPath);
+  const sidecarFailures = unparkSidecars();
+  patchManifest();
+  cleanupParkDir();
+
+  console.log('verifying…');
+  const afterHashes = snapshotMediaHashes();
+  if (!hashesEqual(beforeHashes, afterHashes)) {
+    console.error('DATA ISSUE: media sha256 multiset changed (content altered or file lost/gained)');
+    process.exit(2);
+  }
+  console.log('media hashes unchanged ✓');
+
+  const { sidecars, media, issues } = verifyArchive();
+  console.log('counts', { sidecars, media, renames: renames.size });
+  if (sidecarFailures || issues.length) {
+    console.error('DATA ISSUES:');
+    for (const issue of issues.slice(0, 50)) console.error(' -', issue);
+    if (issues.length > 50) console.error(` … and ${ issues.length - 50 } more`);
+    process.exit(3);
+  }
+  console.log('done — archive OK');
+} finally {
+  releaseArchiveLock(lockPath);
+}

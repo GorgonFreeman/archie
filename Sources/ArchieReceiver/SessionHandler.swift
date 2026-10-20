@@ -1,7 +1,14 @@
 import ArchieCore
 import Foundation
 
+private struct ReceivedResource {
+    var relativePath: String
+    var sha256: String
+    var isSidecar: Bool
+}
+
 /// Mac side: receives one resource at a time, writes atomically, replies with receipt/fail.
+/// After phone requests settle, renames the asset before acknowledging.
 final class SessionHandler {
     private let io: ConnectionIO
     private let archiveRoot: URL
@@ -9,6 +16,9 @@ final class SessionHandler {
     private let manifest: ManifestStore
     private var writer: AtomicWriter?
     private var currentBegin: AssetBeginPayload?
+
+    private var assetResources: [String: [ReceivedResource]] = [:]
+    private var assetCreationDates: [String: Date] = [:]
 
     init(io: ConnectionIO, archiveRoot: URL, pin: String, manifest: ManifestStore) {
         self.io = io
@@ -29,6 +39,8 @@ final class SessionHandler {
                     try appendChunk(payload)
                 case .resourceEnd:
                     try await endResource(payload)
+                case .assetSettle:
+                    try await settleAsset(payload)
                 case .sessionEnd:
                     fputs("session end\n", stderr)
                     return
@@ -62,6 +74,9 @@ final class SessionHandler {
         writer?.abort()
         let begin = try MessageCodec.decode(AssetBeginPayload.self, from: payload)
         currentBegin = begin
+        if let date = begin.creationDate {
+            assetCreationDates[begin.assetId] = date
+        }
         writer = try AtomicWriter(
             archiveRoot: archiveRoot,
             originalFilename: begin.originalFilename,
@@ -98,6 +113,14 @@ final class SessionHandler {
                 size: result.size,
                 sha256: result.sha256
             ))
+            var list = assetResources[begin.assetId] ?? []
+            list.append(ReceivedResource(
+                relativePath: result.relativePath,
+                sha256: result.sha256,
+                isSidecar: begin.isSidecar || begin.resourceType == "sidecar"
+            ))
+            assetResources[begin.assetId] = list
+
             try await io.sendJSON(
                 type: .receipt,
                 value: ReceiptPayload(
@@ -114,5 +137,66 @@ final class SessionHandler {
         }
         self.writer = nil
         currentBegin = nil
+    }
+
+    private func settleAsset(_ payload: Data) async throws {
+        let request = try MessageCodec.decode(AssetSettlePayload.self, from: payload)
+        guard let resources = assetResources[request.assetId], !resources.isEmpty else {
+            try await io.sendJSON(
+                type: .fail,
+                value: FailPayload(reason: "unknown asset for settle")
+            )
+            return
+        }
+
+        let settled = resources.map {
+            SettledResource(
+                relativePath: $0.relativePath,
+                sha256: $0.sha256,
+                isSidecar: $0.isSidecar
+            )
+        }
+
+        do {
+            let pathMap = try AssetRenamer.settle(
+                archiveRoot: archiveRoot,
+                assetId: request.assetId,
+                creationDate: assetCreationDates[request.assetId],
+                resources: settled,
+                manifest: manifest
+            )
+            // Update session paths so a retry sees new names.
+            assetResources[request.assetId] = settled.map { r in
+                ReceivedResource(
+                    relativePath: pathMap[r.relativePath] ?? r.relativePath,
+                    sha256: r.sha256,
+                    isSidecar: r.isSidecar
+                )
+            }
+            // Sidecar content hash changed — refresh from disk if present.
+            if var list = assetResources[request.assetId] {
+                for i in list.indices where list[i].isSidecar {
+                    let url = archiveRoot.appendingPathComponent(list[i].relativePath)
+                    if let dig = try? Sha256Hasher.hash(fileAt: url) {
+                        list[i].sha256 = dig
+                    }
+                }
+                assetResources[request.assetId] = list
+            }
+
+            let mappings = pathMap.map { PathMapping(from: $0.key, to: $0.value) }
+                .sorted { $0.from < $1.from }
+            try await io.sendJSON(
+                type: .assetSettled,
+                value: AssetSettledPayload(assetId: request.assetId, paths: mappings)
+            )
+            fputs("settled \(request.assetId) (\(mappings.count) renames)\n", stderr)
+        } catch {
+            try await io.sendJSON(
+                type: .fail,
+                value: FailPayload(reason: "settle failed: \(error.localizedDescription)")
+            )
+            fputs("settle fail \(error.localizedDescription)\n", stderr)
+        }
     }
 }

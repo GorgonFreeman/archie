@@ -7,4 +7,6 @@ public enum ArchieConstants {
     public static let maxAttempts = 3
     public static let tmpDirName = ".archie-tmp"
     public static let manifestName = "manifest.jsonl"
+    public static let archiveLockName = ".archie-archive.lock"
+    public static let sidecarSuffix = ".asset.json"
 }

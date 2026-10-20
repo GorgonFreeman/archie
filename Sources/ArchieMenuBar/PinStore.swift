@@ -1,14 +1,12 @@
 import Darwin
 import Foundation
 
-@MainActor
-final class PinStore: ObservableObject {
-    @Published private(set) var pin: String?
-    @Published private(set) var receiverRunning = false
+final class PinStore {
+    private(set) var pin: String?
+    private(set) var receiverRunning = false
 
     private let pinFile: URL
     private let pidFile: URL
-    private var timer: Timer?
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -16,12 +14,6 @@ final class PinStore: ObservableObject {
         pinFile = support.appendingPathComponent("current_pin.txt")
         pidFile = support.appendingPathComponent("receiver.pid")
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let store = self else { return }
-            DispatchQueue.main.async {
-                store.refresh()
-            }
-        }
     }
 
     func refresh() {

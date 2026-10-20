@@ -44,10 +44,11 @@ Hidden assets are included in the import.
 Per resource:
 
 1. **Phone:** Stream the original bytes without re-encoding. Compute SHA-256 over the exact bytes sent. Send the metadata (asset ID, resource type, original filename, creation date, size, hash) first, then the bytes.
-2. **Mac:** Write to a temp file while hashing, then `F_FULLFSYNC` and close. Atomically rename to a **flat** `<filename>` under the archive root, adding a suffix on collisions and never overwriting. Reopen the final file and hash it again. Optional post-pass: `scripts/chive_archive.js` parks sidecars, renames media (sidecar `creationDate` when present, otherwise chive), then restores `*.asset.json` next to the new names.
+2. **Mac:** Write to a temp file while hashing, then `F_FULLFSYNC` and close. Atomically rename to a **flat** `<filename>` under the archive root, adding a suffix on collisions and never overwriting. Reopen the final file and hash it again.
 3. **Mac:** Reply with a receipt only if the final-file hash equals both the hash computed during receipt and the phone's declared hash. Otherwise reply with a failure, delete the temp file, and the phone retries (max 3 attempts).
 4. **Phone:** Mark the resource as verified only on a matching receipt.
 5. **Mac:** Append a record to `manifest.jsonl` (asset ID, resource, path, size, hash, timestamp).
+6. **Settle (rename-as-we-go):** After every resource and the sidecar have receipts, the phone sends `ASSET_SETTLE`. The Mac date-renames that asset’s files (one PhotoKit `creationDate` for all resources), rewrites the sidecar paths, patches `manifest.jsonl`, then replies `ASSET_SETTLED`. On settle failure the phone retains the asset. Delete runs only after settle ack. Backlog tool: `scripts/chive_archive.js` under the same archive lock.
 
 If the phone cannot read an original (for example, it is not on the device), the asset is marked failed and retained.
 

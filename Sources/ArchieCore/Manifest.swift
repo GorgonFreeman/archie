@@ -47,4 +47,50 @@ public final class ManifestStore: @unchecked Sendable {
         try handle.write(contentsOf: data)
         try handle.synchronize()
     }
+
+    /// Rewrite relative paths for an asset after settle-rename; refresh sidecar hash/size.
+    public func remapAsset(
+        assetId: String,
+        pathMap: [String: String],
+        sidecarRelativePath: String,
+        sidecarSha256: String,
+        sidecarSize: Int64
+    ) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var out: [String] = []
+        out.reserveCapacity(lines.count)
+
+        for line in lines {
+            if line.isEmpty {
+                out.append("")
+                continue
+            }
+            guard var row = try? MessageCodec.decode(ManifestRecord.self, from: Data(line.utf8)) else {
+                out.append(String(line))
+                continue
+            }
+            guard row.assetId == assetId else {
+                out.append(String(line))
+                continue
+            }
+            if let mapped = pathMap[row.relativePath] {
+                row.relativePath = mapped
+            }
+            if row.resourceType == "sidecar" || row.relativePath.hasSuffix(ArchieConstants.sidecarSuffix) {
+                row.relativePath = sidecarRelativePath
+                row.sha256 = sidecarSha256
+                row.size = sidecarSize
+            }
+            let encoded = try MessageCodec.encode(row)
+            out.append(String(decoding: encoded, as: UTF8.self))
+        }
+
+        let joined = out.joined(separator: "\n")
+        let final = joined.hasSuffix("\n") || joined.isEmpty ? joined : joined + "\n"
+        try final.write(to: url, atomically: true, encoding: .utf8)
+    }
 }

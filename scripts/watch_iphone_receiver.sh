@@ -70,28 +70,54 @@ start_receiver() {
     return 1
   }
 
-  rm -f "${PIN_FILE}"
+  # Avoid stacking instances if a previous pidfile was stale.
+  pkill -f '/archie-receiver ' 2>/dev/null || true
+  sleep 0.2
+
+  rm -f "${PIN_FILE}" "${PID_FILE}"
   log "starting ${bin} -> ${ARCHIVE}"
-  # Launch detached; PIN is written by the receiver to PIN_FILE.
-  nohup "${bin}" "${ARCHIVE}" >> "${LOG_DIR}/receiver.log" 2>&1 &
-  local pid=$!
-  echo "${pid}" > "${PID_FILE}"
+
+  # Double-fork into a new session so LaunchAgent does not kill us when
+  # this short --once watch job exits (that was causing the PIN loop).
+  /usr/bin/python3 - "${bin}" "${ARCHIVE}" "${PID_FILE}" "${LOG_DIR}/receiver.log" <<'PY'
+import os
+import subprocess
+import sys
+
+bin_path, archive, pid_file, log_path = sys.argv[1:5]
+if os.fork() > 0:
+    raise SystemExit(0)
+os.setsid()
+if os.fork() > 0:
+    raise SystemExit(0)
+os.chdir('/')
+with open(log_path, 'a', encoding='utf-8') as log:
+    proc = subprocess.Popen(
+        [bin_path, archive],
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=log,
+        start_new_session=True,
+    )
+with open(pid_file, 'w', encoding='utf-8') as f:
+    f.write(str(proc.pid))
+PY
 
   # Wait briefly for PIN file.
   local i pin=""
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    if [[ -f "${PIN_FILE}" ]]; then
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    if [[ -f "${PIN_FILE}" && -f "${PID_FILE}" ]]; then
       pin="$(tr -d '[:space:]' < "${PIN_FILE}")"
       break
     fi
-    sleep 0.3
+    sleep 0.2
   done
 
   if [[ -n "${pin}" ]]; then
-    log "PIN ${pin}"
+    log "PIN ${pin} pid $(cat "${PID_FILE}" 2>/dev/null || echo '?')"
     notify_pin "${pin}"
   else
-    log "warning: PIN file not ready yet (pid ${pid})"
+    log "warning: PIN file not ready yet"
   fi
 }
 

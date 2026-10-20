@@ -63,6 +63,26 @@ public final class TransferClient: @unchecked Sendable {
         }
     }
 
+    /// Ask Mac to date-rename the verified asset; required before phone delete.
+    public func settleAsset(assetId: String) async throws -> AssetSettledPayload {
+        guard let io else { throw TransferError.notConnected }
+        try await io.sendJSON(type: .assetSettle, value: AssetSettlePayload(assetId: assetId))
+        let (type, payload) = try await io.receive()
+        switch type {
+        case .assetSettled:
+            let settled = try MessageCodec.decode(AssetSettledPayload.self, from: payload)
+            guard settled.assetId == assetId else {
+                throw TransferError.protocolError("settle assetId mismatch")
+            }
+            return settled
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected ASSET_SETTLED")
+        }
+    }
+
     public func endSession() async throws {
         try await io?.send(type: .sessionEnd)
         connection?.cancel()

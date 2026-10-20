@@ -8,6 +8,8 @@ public enum FrameType: UInt8, Sendable {
     case receipt = 5
     case fail = 6
     case sessionEnd = 7
+    case assetSettle = 8
+    case assetSettled = 9
 }
 
 public struct HelloPayload: Codable, Sendable {
@@ -77,6 +79,34 @@ public struct FailPayload: Codable, Sendable {
 
     public init(reason: String) {
         self.reason = reason
+    }
+}
+
+public struct AssetSettlePayload: Codable, Sendable {
+    public var assetId: String
+
+    public init(assetId: String) {
+        self.assetId = assetId
+    }
+}
+
+public struct PathMapping: Codable, Sendable {
+    public var from: String
+    public var to: String
+
+    public init(from: String, to: String) {
+        self.from = from
+        self.to = to
+    }
+}
+
+public struct AssetSettledPayload: Codable, Sendable {
+    public var assetId: String
+    public var paths: [PathMapping]
+
+    public init(assetId: String, paths: [PathMapping]) {
+        self.assetId = assetId
+        self.paths = paths
     }
 }
 

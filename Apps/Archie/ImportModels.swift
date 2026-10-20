@@ -7,6 +7,7 @@ enum RetainReason: String, Sendable {
     case sidecarFailed
     case limitedAccess
     case deleteDeclined
+    case settleFailed
 }
 
 struct AssetOutcome: Identifiable, Sendable {
