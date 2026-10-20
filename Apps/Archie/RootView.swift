@@ -24,6 +24,12 @@ struct RootView: View {
                         Task { await importer.run(pin: pin) }
                     }
                     .disabled(importer.isRunning || pin.count < 4)
+                    if importer.isRunning {
+                        Button(importer.isPaused ? "Resume" : "Pause") {
+                            if importer.isPaused { importer.resume() }
+                            else { importer.pause() }
+                        }
+                    }
                     Text(importer.status)
                         .foregroundStyle(.secondary)
                     if importer.total > 0 {

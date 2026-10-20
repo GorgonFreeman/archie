@@ -9,6 +9,7 @@ final class ImportCoordinator: ObservableObject {
     @Published var total = 0
     @Published var summary = ImportSummary()
     @Published var isRunning = false
+    @Published var isPaused = false
 
     private let settings: SettingsStore
 
@@ -16,11 +17,25 @@ final class ImportCoordinator: ObservableObject {
         self.settings = settings
     }
 
+    func pause() {
+        guard isRunning else { return }
+        isPaused = true
+        status = "Paused — finishing current asset, then holding"
+    }
+
+    func resume() {
+        guard isRunning else { return }
+        isPaused = false
+        status = "Resuming…"
+    }
+
     func run(pin: String) async {
         guard !isRunning else { return }
         isRunning = true
+        isPaused = false
         defer {
             isRunning = false
+            isPaused = false
             UIApplication.shared.isIdleTimerDisabled = false
         }
         UIApplication.shared.isIdleTimerDisabled = true
@@ -53,6 +68,10 @@ final class ImportCoordinator: ObservableObject {
         fetch.enumerateObjects { asset, _, _ in assets.append(asset) }
 
         for asset in assets {
+            while isPaused {
+                status = "Paused at \(progress)/\(total)"
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
             progress += 1
             status = "Asset \(progress)/\(total)"
             let outcome = await transferVerifyDelete(asset, client: client)
