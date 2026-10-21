@@ -71,8 +71,8 @@ final class AssetRenamerTests: XCTestCase {
             manifest: manifest
         )
 
-        let expectedHeic = "2020-01-15_14h30m45s.HEIC"
-        let expectedMov = "2020-01-15_14h30m45s.MOV"
+        let expectedHeic = "2020-01-15_14h30m45s.heic"
+        let expectedMov = "2020-01-15_14h30m45s.mov"
         let expectedSide = expectedHeic + ArchieConstants.sidecarSuffix
 
         XCTAssertEqual(pathMap[heic.name], expectedHeic)
@@ -104,7 +104,7 @@ final class AssetRenamerTests: XCTestCase {
     }
 
     func testCollisionUsesNumericSuffix() throws {
-        let blocker = "2020-01-15_14h30m45s.HEIC"
+        let blocker = "2020-01-15_14h30m45s.heic"
         try Data([0xFF]).write(to: root.appendingPathComponent(blocker))
 
         let heic = try writeMedia(name: "IMG_2002.HEIC", bytes: Data([0x11, 0x22]))
@@ -126,10 +126,84 @@ final class AssetRenamerTests: XCTestCase {
             manifest: manifest
         )
 
-        XCTAssertEqual(pathMap[heic.name], "2020-01-15_14h30m45s_1.HEIC")
-        XCTAssertTrue(exists("2020-01-15_14h30m45s_1.HEIC"))
+        XCTAssertEqual(pathMap[heic.name], "2020-01-15_14h30m45s_1.heic")
+        XCTAssertTrue(exists("2020-01-15_14h30m45s_1.heic"))
         XCTAssertTrue(exists(blocker))
         XCTAssertEqual(try Sha256Hasher.hash(fileAt: root.appendingPathComponent(blocker)), try hash(Data([0xFF])))
+    }
+
+    /// Edited Live Photos often ship both `.MOV` and `.mov`; APFS treats those as one name.
+    func testSameExtensionDifferentCaseGetsNumericSuffix() throws {
+        let jpg = try writeMedia(name: "IMG_1404.JPG", bytes: Data([0x01]))
+        let paired = try writeMedia(name: "IMG_1404.MOV", bytes: Data([0x02, 0x03]))
+        let render = try writeMedia(name: "FullSizeRender-9.mov", bytes: Data([0x04, 0x05, 0x06]))
+        let assetId = "asset-case-ext"
+        let side = try writeSidecar(
+            assetId: assetId,
+            media: [
+                (type: "photo", path: jpg.name, sha: jpg.sha, size: jpg.size),
+                (type: "pairedVideo", path: paired.name, sha: paired.sha, size: paired.size),
+                (type: "fullSizeVideo", path: render.name, sha: render.sha, size: render.size),
+            ]
+        )
+        try manifest.append(ManifestRecord(
+            assetId: assetId,
+            resourceType: "photo",
+            relativePath: jpg.name,
+            size: jpg.size,
+            sha256: jpg.sha
+        ))
+        try manifest.append(ManifestRecord(
+            assetId: assetId,
+            resourceType: "pairedVideo",
+            relativePath: paired.name,
+            size: paired.size,
+            sha256: paired.sha
+        ))
+        try manifest.append(ManifestRecord(
+            assetId: assetId,
+            resourceType: "fullSizeVideo",
+            relativePath: render.name,
+            size: render.size,
+            sha256: render.sha
+        ))
+        try manifest.append(ManifestRecord(
+            assetId: assetId,
+            resourceType: "sidecar",
+            relativePath: side.name,
+            size: side.size,
+            sha256: side.sha
+        ))
+
+        let pathMap = try AssetRenamer.settle(
+            archiveRoot: root,
+            assetId: assetId,
+            creationDate: creationDate,
+            resources: [
+                SettledResource(relativePath: jpg.name, sha256: jpg.sha, isSidecar: false),
+                SettledResource(relativePath: paired.name, sha256: paired.sha, isSidecar: false),
+                SettledResource(relativePath: render.name, sha256: render.sha, isSidecar: false),
+                SettledResource(relativePath: side.name, sha256: side.sha, isSidecar: true),
+            ],
+            manifest: manifest
+        )
+
+        XCTAssertEqual(pathMap[jpg.name], "2020-01-15_14h30m45s.jpg")
+        XCTAssertEqual(pathMap[paired.name], "2020-01-15_14h30m45s.mov")
+        XCTAssertEqual(pathMap[render.name], "2020-01-15_14h30m45s_1.mov")
+        XCTAssertTrue(exists("2020-01-15_14h30m45s.jpg"))
+        XCTAssertTrue(exists("2020-01-15_14h30m45s.mov"))
+        XCTAssertTrue(exists("2020-01-15_14h30m45s_1.mov"))
+        XCTAssertEqual(
+            try Sha256Hasher.hash(fileAt: root.appendingPathComponent("2020-01-15_14h30m45s.mov")),
+            paired.sha
+        )
+        XCTAssertEqual(
+            try Sha256Hasher.hash(fileAt: root.appendingPathComponent("2020-01-15_14h30m45s_1.mov")),
+            render.sha
+        )
+        XCTAssertFalse(exists(paired.name))
+        XCTAssertFalse(exists(render.name))
     }
 
     func testIdempotentWhenAlreadySettled() throws {
@@ -197,7 +271,7 @@ final class AssetRenamerTests: XCTestCase {
 
         XCTAssertTrue(exists(heic.name))
         XCTAssertTrue(exists(side.name))
-        XCTAssertFalse(exists("2020-01-15_14h30m45s.HEIC"))
+        XCTAssertFalse(exists("2020-01-15_14h30m45s.heic"))
     }
 
     func testSidecarDecodeFailureRollsBackMedia() throws {
@@ -248,9 +322,9 @@ final class AssetRenamerTests: XCTestCase {
         XCTAssertTrue(exists(mov.name))
         XCTAssertTrue(exists(badSidecarName))
         XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(badSidecarName)), badBytes)
-        XCTAssertFalse(exists("2020-01-15_14h30m45s.HEIC"))
-        XCTAssertFalse(exists("2020-01-15_14h30m45s.MOV"))
-        XCTAssertFalse(exists("2020-01-15_14h30m45s.HEIC.asset.json"))
+        XCTAssertFalse(exists("2020-01-15_14h30m45s.heic"))
+        XCTAssertFalse(exists("2020-01-15_14h30m45s.mov"))
+        XCTAssertFalse(exists("2020-01-15_14h30m45s.heic.asset.json"))
 
         let rows = try readManifest()
         XCTAssertEqual(Set(rows.map(\.relativePath)), Set([heic.name, mov.name, badSidecarName]))

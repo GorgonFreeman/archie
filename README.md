@@ -41,6 +41,14 @@ Takes the same `.archie-archive.lock` as live settle. Uses each sidecar’s Phot
 
 ## iOS app
 
-Open `Apps/Archie.xcodeproj` in Xcode, set your development team, run on a device, enter the PIN shown by the receiver.
+From this repo (phone plugged in and unlocked):
+
+```bash
+pnpm redeploy
+```
+
+Override team/device with `ARCHIE_DEVELOPMENT_TEAM` / `ARCHIE_DEVICE`.
+
+Xcode works too: open `Apps/Archie.xcodeproj`, set your development team, Run on a device. Enter the PIN shown by the receiver.
 
 See `spec.md` and `spec_full.md` for the design.

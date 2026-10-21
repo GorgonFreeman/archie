@@ -1,0 +1,7 @@
+{
+  "name": "archie",
+  "private": true,
+  "scripts": {
+    "redeploy": "./scripts/redeploy_ios.sh"
+  }
+}

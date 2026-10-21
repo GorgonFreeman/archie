@@ -182,15 +182,18 @@ public enum AssetRenamer {
         from: URL,
         reserved: inout Set<String>
     ) -> URL {
-        let suffix = ext.isEmpty ? "" : (ext.hasPrefix(".") ? ext : ".\(ext)")
+        // Lowercase extensions so .MOV / .mov claim the same name on case-insensitive APFS.
+        let raw = ext.hasPrefix(".") ? String(ext.dropFirst()) : ext
+        let suffix = raw.isEmpty ? "" : ".\(raw.lowercased())"
         var n = 0
         while true {
             let name = n == 0 ? "\(baseName)\(suffix)" : "\(baseName)_\(n)\(suffix)"
+            let key = name.lowercased()
             let url = directory.appendingPathComponent(name)
             let takenOnDisk = FileManager.default.fileExists(atPath: url.path)
                 && url.standardizedFileURL != from.standardizedFileURL
-            if !takenOnDisk && !reserved.contains(name) {
-                reserved.insert(name)
+            if !takenOnDisk && !reserved.contains(key) {
+                reserved.insert(key)
                 return url
             }
             n += 1
