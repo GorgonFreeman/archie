@@ -35,7 +35,7 @@ struct RootView: View {
                     if importer.total > 0 {
                         ProgressView(value: Double(importer.progress), total: Double(importer.total))
                     }
-                    Text("Each asset is deleted only after every resource and its sidecar have matching Mac receipts.")
+                    Text("Deletes run in batches after verify (one Photos prompt per batch). Tap Allow when asked.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

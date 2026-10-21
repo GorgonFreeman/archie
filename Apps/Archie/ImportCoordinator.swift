@@ -67,76 +67,133 @@ final class ImportCoordinator: ObservableObject {
         var assets: [PHAsset] = []
         fetch.enumerateObjects { asset, _, _ in assets.append(asset) }
 
+        // Queue verified copies and delete in batches — one iOS Photos prompt per batch.
+        var pendingDeletes: [VerifiedCopy] = []
+
         for asset in assets {
             while isPaused {
+                if !pendingDeletes.isEmpty {
+                    status = "Paused — confirming delete of \(pendingDeletes.count)…"
+                    await flushDeletes(&pendingDeletes)
+                }
                 status = "Paused at \(progress)/\(total)"
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
             progress += 1
             status = "Asset \(progress)/\(total)"
-            let outcome = await transferVerifyDelete(asset, client: client)
-            summary.outcomes.append(outcome)
-            summary.imported += 1
-            if outcome.verified {
-                summary.verified += 1
-                summary.bytesVerified += outcome.bytes
-            } else {
-                summary.failed += 1
+            let settled = await transferAndSettle(asset, client: client)
+            recordTransfer(settled.outcome)
+            if let copy = settled.copy {
+                pendingDeletes.append(copy)
+                if pendingDeletes.count >= DeletionService.deleteBatchSize {
+                    status = "Confirm delete of \(pendingDeletes.count)…"
+                    await flushDeletes(&pendingDeletes)
+                }
             }
-            if outcome.deleted {
-                summary.deleted += 1
-            } else {
-                summary.retained += 1
-            }
+        }
+
+        if !pendingDeletes.isEmpty {
+            status = "Confirm delete of \(pendingDeletes.count)…"
+            await flushDeletes(&pendingDeletes)
         }
 
         try? await client.endSession()
         status = "Finished — deleted \(summary.deleted), retained \(summary.retained)"
     }
 
-    /// Transfer → require matching receipts for every resource + sidecar → then maybe delete.
-    private func transferVerifyDelete(
+    private struct SettledTransfer {
+        var outcome: AssetOutcome
+        /// Non-nil when verified + settled and eligible to queue for delete.
+        var copy: VerifiedCopy?
+    }
+
+    /// Transfer → settle; defer delete so many assets share one Photos confirmation.
+    private func transferAndSettle(
         _ asset: PHAsset,
         client: TransferClient
-    ) async -> AssetOutcome {
+    ) async -> SettledTransfer {
         switch await transferVerified(asset, client: client) {
         case .failure(let reason, let bytes):
-            return AssetOutcome(
-                id: asset.localIdentifier,
-                bytes: bytes,
-                verified: false,
-                deleted: false,
-                retainReason: reason
+            return SettledTransfer(
+                outcome: AssetOutcome(
+                    id: asset.localIdentifier,
+                    bytes: bytes,
+                    verified: false,
+                    deleted: false,
+                    retainReason: reason
+                ),
+                copy: nil
             )
         case .success(let copy):
-            // Rename-as-we-go must succeed before delete (settle ack).
             do {
                 _ = try await client.settleAsset(assetId: copy.assetId)
             } catch {
-                return AssetOutcome(
-                    id: copy.assetId,
-                    bytes: copy.bytes,
-                    verified: true,
-                    deleted: false,
-                    retainReason: .settleFailed
+                return SettledTransfer(
+                    outcome: AssetOutcome(
+                        id: copy.assetId,
+                        bytes: copy.bytes,
+                        verified: true,
+                        deleted: false,
+                        retainReason: .settleFailed
+                    ),
+                    copy: nil
                 )
             }
-
-            switch await DeletionService.deleteVerified(copy, settings: settings) {
-            case .deleted:
-                return AssetOutcome(
-                    id: copy.assetId,
-                    bytes: copy.bytes,
-                    verified: true,
-                    deleted: true,
-                    retainReason: nil
-                )
-            case .retained(let reason):
-                return AssetOutcome(
+            // Placeholder until batch delete runs — counts as verified, not yet deleted/retained.
+            return SettledTransfer(
+                outcome: AssetOutcome(
                     id: copy.assetId,
                     bytes: copy.bytes,
                     verified: true,
                     deleted: false,
+                    retainReason: nil
+                ),
+                copy: copy
+            )
+        }
+    }
+
+    private func recordTransfer(_ outcome: AssetOutcome) {
+        summary.outcomes.append(outcome)
+        summary.imported += 1
+        if outcome.verified {
+            summary.verified += 1
+            summary.bytesVerified += outcome.bytes
+        } else {
+            summary.failed += 1
+        }
+        // Pending deletes have verified=true, retainReason=nil — counted in flushDeletes.
+        if !outcome.deleted && (outcome.retainReason != nil || !outcome.verified) {
+            summary.retained += 1
+        }
+    }
+
+    private func flushDeletes(_ pending: inout [VerifiedCopy]) async {
+        let batch = pending
+        pending.removeAll(keepingCapacity: true)
+        guard !batch.isEmpty else { return }
+
+        let results = await DeletionService.deleteVerifiedBatch(batch, settings: settings)
+        for copy in batch {
+            let result = results[copy.assetId] ?? .retained(.failed)
+            let deleted: Bool
+            let reason: RetainReason?
+            switch result {
+            case .deleted:
+                deleted = true
+                reason = nil
+                summary.deleted += 1
+            case .retained(let r):
+                deleted = false
+                reason = r
+                summary.retained += 1
+            }
+            if let idx = summary.outcomes.firstIndex(where: { $0.id == copy.assetId }) {
+                summary.outcomes[idx] = AssetOutcome(
+                    id: copy.assetId,
+                    bytes: copy.bytes,
+                    verified: true,
+                    deleted: deleted,
                     retainReason: reason
                 )
             }

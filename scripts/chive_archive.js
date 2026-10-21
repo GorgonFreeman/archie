@@ -108,10 +108,11 @@ function formatChiveDate(date) {
   );
 }
 
-function uniquePath(dir, baseName, ext) {
+function uniquePath(dir, baseName, ext, fromPath = null) {
+  const from = fromPath ? path.resolve(fromPath) : null;
   let candidate = path.join(dir, `${ baseName }${ ext }`);
   let n = 1;
-  while (fs.existsSync(candidate)) {
+  while (fs.existsSync(candidate) && path.resolve(candidate) !== from) {
     candidate = path.join(dir, `${ baseName }_${ n }${ ext }`);
     n += 1;
   }
@@ -176,7 +177,7 @@ function flattenMediaToRoot() {
 
     const ext = path.extname(file);
     const base = path.basename(file, ext);
-    const dest = uniquePath(archiveRoot, base, ext);
+    const dest = uniquePath(archiveRoot, base, ext, file);
     fs.renameSync(file, dest);
     recordRename(file, dest);
     moved += 1;
@@ -223,7 +224,7 @@ function renameFromSidecarDates() {
     if (Number.isNaN(date.getTime())) continue;
 
     const ext = path.extname(current);
-    const newPath = uniquePath(archiveRoot, formatChiveDate(date), ext);
+    const newPath = uniquePath(archiveRoot, formatChiveDate(date), ext, current);
     if (path.resolve(newPath) === path.resolve(current)) continue;
 
     fs.renameSync(current, newPath);
@@ -498,6 +499,7 @@ function releaseArchiveLock(lockPath) {
 }
 
 const lockPath = acquireArchiveLock();
+let exitCode = 0;
 try {
   console.log('snapshotting media hashes…');
   const beforeHashes = snapshotMediaHashes();
@@ -516,19 +518,22 @@ try {
   const afterHashes = snapshotMediaHashes();
   if (!hashesEqual(beforeHashes, afterHashes)) {
     console.error('DATA ISSUE: media sha256 multiset changed (content altered or file lost/gained)');
-    process.exit(2);
-  }
-  console.log('media hashes unchanged ✓');
+    exitCode = 2;
+  } else {
+    console.log('media hashes unchanged ✓');
 
-  const { sidecars, media, issues } = verifyArchive();
-  console.log('counts', { sidecars, media, renames: renames.size });
-  if (sidecarFailures || issues.length) {
-    console.error('DATA ISSUES:');
-    for (const issue of issues.slice(0, 50)) console.error(' -', issue);
-    if (issues.length > 50) console.error(` … and ${ issues.length - 50 } more`);
-    process.exit(3);
+    const { sidecars, media, issues } = verifyArchive();
+    console.log('counts', { sidecars, media, renames: renames.size });
+    if (sidecarFailures || issues.length) {
+      console.error('DATA ISSUES:');
+      for (const issue of issues.slice(0, 50)) console.error(' -', issue);
+      if (issues.length > 50) console.error(` … and ${ issues.length - 50 } more`);
+      exitCode = 3;
+    } else {
+      console.log('done — archive OK');
+    }
   }
-  console.log('done — archive OK');
 } finally {
   releaseArchiveLock(lockPath);
 }
+if (exitCode) process.exit(exitCode);
