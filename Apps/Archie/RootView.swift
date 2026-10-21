@@ -35,7 +35,7 @@ struct RootView: View {
                     if importer.total > 0 {
                         ProgressView(value: Double(importer.progress), total: Double(importer.total))
                     }
-                    Text("Deletes when you pause or when the run finishes (one Photos prompt). Tap Allow when asked.")
+                    Text("Deletes on pause or when finished. Live Photos: still only (no paired video).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

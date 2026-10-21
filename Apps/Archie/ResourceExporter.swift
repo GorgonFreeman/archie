@@ -11,12 +11,23 @@ struct ExportedResource {
 
 enum ResourceExporter {
     /// Streams each PHAssetResource to a temp file while hashing (no re-encode).
+    /// Skips Live Photo paired videos — archive keeps the still only.
     static func exportAll(for asset: PHAsset) async throws -> [ExportedResource] {
         var out: [ExportedResource] = []
         for resource in PHAssetResource.assetResources(for: asset) {
+            if isLivePhotoPairedVideo(resource.type) { continue }
             out.append(try await exportOne(resource))
         }
         return out
+    }
+
+    private static func isLivePhotoPairedVideo(_ type: PHAssetResourceType) -> Bool {
+        switch type {
+        case .pairedVideo, .fullSizePairedVideo, .adjustmentBasePairedVideo:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func exportOne(_ resource: PHAssetResource) async throws -> ExportedResource {

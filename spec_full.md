@@ -37,7 +37,7 @@ An asset is **protected** if it is a favourite (and the toggle is on) or belongs
 
 ## Import flow
 
-For each asset (`PHAsset`), the app transfers all of its resources via `PHAssetResourceManager`: original photo or video, paired video (Live Photo), RAW and JPEG partners, edited full-size render, and adjustment data. This keeps Live Photos, edits and RAW+JPEG intact without guessing from filenames.
+For each asset (`PHAsset`), the app transfers its resources via `PHAssetResourceManager`: original photo or video, RAW and JPEG partners, edited full-size render, and adjustment data. **Live Photo paired videos** (`pairedVideo` / `fullSizePairedVideo` / `adjustmentBasePairedVideo`) are **skipped** — only the still is archived (HEIC/JPEG as on device, no re-encode). Stand-alone videos are unchanged.
 
 Hidden assets are included in the import.
 
@@ -109,7 +109,7 @@ The UI reports running counts of imported, verified, deleted, retained (and why:
 3. Re-running after an interruption does not duplicate or corrupt verified files.
 4. Favourites (when protected) and protected-album assets are never deleted, including when album membership changes between import and delete.
 5. An asset with any unverified or missing resource is never deleted.
-6. Live Photos, RAW+JPEG and edited photos arrive with all components.
+6. Live Photos arrive as the still only (no paired video); RAW+JPEG and edited photos still include their non-paired components.
 7. Limited-access authorization blocks deletion.
 8. The app reports counts of imported, verified, failed, retained, and deleted assets.
 9. Every imported asset has a sidecar that parses as valid JSON, lists all its resources with matching hashes, and carries its location, favourite and album data. An asset whose sidecar failed verification is never deleted.
