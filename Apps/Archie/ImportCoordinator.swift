@@ -67,7 +67,7 @@ final class ImportCoordinator: ObservableObject {
         var assets: [PHAsset] = []
         fetch.enumerateObjects { asset, _, _ in assets.append(asset) }
 
-        // Queue verified copies and delete in batches — one iOS Photos prompt per batch.
+        // Queue verified copies; delete only on pause or when the run finishes.
         var pendingDeletes: [VerifiedCopy] = []
 
         for asset in assets {
@@ -85,10 +85,6 @@ final class ImportCoordinator: ObservableObject {
             recordTransfer(settled.outcome)
             if let copy = settled.copy {
                 pendingDeletes.append(copy)
-                if pendingDeletes.count >= DeletionService.deleteBatchSize {
-                    status = "Confirm delete of \(pendingDeletes.count)…"
-                    await flushDeletes(&pendingDeletes)
-                }
             }
         }
 
