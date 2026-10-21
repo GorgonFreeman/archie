@@ -88,33 +88,41 @@ public final class AtomicWriter: @unchecked Sendable {
         let duringHash = duringHasher.finalize()
 
         // Exclusive with settle/backlog so nothing can land on our dest between check and move.
-        let result: WriteResult = try ArchiveLock.withLock(archiveRoot: archiveRoot) {
-            if FileManager.default.fileExists(atPath: finalURL.path) {
-                let dest = ArchiveLayout.uniqueURL(
-                    archiveRoot: archiveRoot,
-                    originalFilename: originalFilename,
-                    creationDate: creationDate
-                )
-                finalURL = dest.url
-                relativePath = dest.relativePath
-            }
-            try FileManager.default.moveItem(at: tmpURL, to: finalURL)
-            published = true
-            let finalHash = try Sha256Hasher.hash(fileAt: finalURL)
-
-            guard duringHash == declaredSha256, finalHash == declaredSha256 else {
-                try? FileManager.default.removeItem(at: finalURL)
-                published = false
-                throw AtomicWriterError.hashMismatch(
-                    expected: declaredSha256,
-                    during: duringHash,
-                    final: finalHash
-                )
-            }
-
-            return WriteResult(relativePath: relativePath, sha256: finalHash, size: written)
+        // ArchiveLock is Mac-only (iOS app shares this file but never publishes to the archive).
+        #if os(macOS)
+        return try ArchiveLock.withLock(archiveRoot: archiveRoot) {
+            try self.publishLocked(duringHash: duringHash)
         }
-        return result
+        #else
+        return try publishLocked(duringHash: duringHash)
+        #endif
+    }
+
+    private func publishLocked(duringHash: String) throws -> WriteResult {
+        if FileManager.default.fileExists(atPath: finalURL.path) {
+            let dest = ArchiveLayout.uniqueURL(
+                archiveRoot: archiveRoot,
+                originalFilename: originalFilename,
+                creationDate: creationDate
+            )
+            finalURL = dest.url
+            relativePath = dest.relativePath
+        }
+        try FileManager.default.moveItem(at: tmpURL, to: finalURL)
+        published = true
+        let finalHash = try Sha256Hasher.hash(fileAt: finalURL)
+
+        guard duringHash == declaredSha256, finalHash == declaredSha256 else {
+            try? FileManager.default.removeItem(at: finalURL)
+            published = false
+            throw AtomicWriterError.hashMismatch(
+                expected: declaredSha256,
+                during: duringHash,
+                final: finalHash
+            )
+        }
+
+        return WriteResult(relativePath: relativePath, sha256: finalHash, size: written)
     }
 
     public func abort() {

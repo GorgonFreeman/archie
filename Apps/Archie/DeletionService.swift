@@ -8,7 +8,7 @@ enum DeleteResult: Sendable {
 enum DeletionService {
     /// Max assets per `deleteAssets` call. iOS shows one confirmation per call;
     /// batching cuts prompts without waiting until the whole import ends.
-    static let deleteBatchSize = 25
+    static let deleteBatchSize = 500
 
     /// Deletes only a `VerifiedCopy` (all resources + sidecar receipt-matched).
     /// Re-reads protection and requires full Photos access.

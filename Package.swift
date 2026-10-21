@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "ArchieCore", targets: ["ArchieCore"]),
         .executable(name: "archie-receiver", targets: ["ArchieReceiver"]),
         .executable(name: "archie-menubar", targets: ["ArchieMenuBar"]),
+        .executable(name: "archie-settle-leftovers", targets: ["ArchieSettleLeftovers"]),
     ],
     targets: [
         .target(name: "ArchieCore"),
@@ -20,6 +21,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "ArchieMenuBar"
+        ),
+        .executableTarget(
+            name: "ArchieSettleLeftovers",
+            dependencies: ["ArchieCore"]
         ),
         .testTarget(
             name: "ArchieCoreTests",
