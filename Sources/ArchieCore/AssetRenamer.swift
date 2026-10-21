@@ -17,6 +17,7 @@ public enum AssetRenamerError: Error, LocalizedError {
     case hashMismatch(String)
     case noMedia
     case sidecarDecode
+    case destExists(String)
     case rollbackFailed(String)
 
     public var errorDescription: String? {
@@ -25,6 +26,7 @@ public enum AssetRenamerError: Error, LocalizedError {
         case .hashMismatch(let p): return "hash mismatch \(p)"
         case .noMedia: return "no media resources to rename"
         case .sidecarDecode: return "could not decode sidecar"
+        case .destExists(let p): return "refusing to clobber existing \(p)"
         case .rollbackFailed(let m): return "rollback failed: \(m)"
         }
     }
@@ -112,6 +114,12 @@ public enum AssetRenamer {
         let sidecarTo = archiveRoot.appendingPathComponent(sidecarNew)
         pathMap[sidecarOld] = sidecarNew
 
+        // Fail before any media moves if the new sidecar path would clobber a foreign file.
+        if sidecarFrom.standardizedFileURL != sidecarTo.standardizedFileURL,
+           FileManager.default.fileExists(atPath: sidecarTo.path) {
+            throw AssetRenamerError.destExists(sidecarNew)
+        }
+
         let originalSidecarData = try Data(contentsOf: sidecarFrom)
         var movedMedia: [(current: URL, original: URL)] = []
         do {
@@ -129,9 +137,27 @@ public enum AssetRenamer {
             }
             let newData = try MessageCodec.encode(doc)
             if sidecarFrom.standardizedFileURL != sidecarTo.standardizedFileURL {
-                try newData.write(to: sidecarTo, options: .atomic)
+                // Race: something appeared since preflight.
+                guard !FileManager.default.fileExists(atPath: sidecarTo.path) else {
+                    throw AssetRenamerError.destExists(sidecarNew)
+                }
+                let tmpSide = archiveRoot
+                    .appendingPathComponent(ArchieConstants.tmpDirName, isDirectory: true)
+                    .appendingPathComponent("sidecar-\(UUID().uuidString).json")
+                try FileManager.default.createDirectory(
+                    at: tmpSide.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try newData.write(to: tmpSide, options: .atomic)
+                do {
+                    try FileManager.default.moveItem(at: tmpSide, to: sidecarTo)
+                } catch {
+                    try? FileManager.default.removeItem(at: tmpSide)
+                    throw error
+                }
                 try FileManager.default.removeItem(at: sidecarFrom)
             } else {
+                // Same path: rewrite our own sidecar after media path updates (not a foreign file).
                 try newData.write(to: sidecarTo, options: .atomic)
             }
 

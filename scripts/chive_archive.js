@@ -119,6 +119,19 @@ function uniquePath(dir, baseName, ext, fromPath = null) {
   return candidate;
 }
 
+/** Rename that never replaces an existing dest (POSIX rename would clobber). */
+function renameNoClobber(from, to) {
+  from = path.resolve(from);
+  to = path.resolve(to);
+  if (from === to) return;
+  if (fs.existsSync(to)) {
+    throw new Error(`refusing to clobber ${ to }`);
+  }
+  // link+unlink fails if `to` appears between existsSync and link (exclusive publish).
+  fs.linkSync(from, to);
+  fs.unlinkSync(from);
+}
+
 function recordRename(from, to) {
   from = path.resolve(from);
   to = path.resolve(to);
@@ -162,7 +175,7 @@ function parkAllSidecars() {
     if (!isSidecar(file)) continue;
     const media = mediaPathForSidecar(file);
     const parkPath = path.join(parkDir, `${ randomUUID() }.json`);
-    fs.renameSync(file, parkPath);
+    renameNoClobber(file, parkPath);
     parked.push({ parkPath, originalMediaPath: path.resolve(media) });
   }
   console.log('parked sidecars', parked.length);
@@ -178,7 +191,7 @@ function flattenMediaToRoot() {
     const ext = path.extname(file);
     const base = path.basename(file, ext);
     const dest = uniquePath(archiveRoot, base, ext, file);
-    fs.renameSync(file, dest);
+    renameNoClobber(file, dest);
     recordRename(file, dest);
     moved += 1;
   }
@@ -227,7 +240,7 @@ function renameFromSidecarDates() {
     const newPath = uniquePath(archiveRoot, formatChiveDate(date), ext, current);
     if (path.resolve(newPath) === path.resolve(current)) continue;
 
-    fs.renameSync(current, newPath);
+    renameNoClobber(current, newPath);
     recordRename(current, newPath);
     n += 1;
   }
@@ -298,7 +311,14 @@ function unparkSidecars() {
       console.error('MISSING media for sidecar', originalMediaPath, '->', newAbs);
       failed += 1;
       const fallback = path.join(archiveRoot, path.basename(originalMediaPath) + SIDECAR_SUFFIX);
-      fs.renameSync(parkPath, uniquePath(archiveRoot, path.basename(fallback, SIDECAR_SUFFIX), SIDECAR_SUFFIX));
+      try {
+        renameNoClobber(
+          parkPath,
+          uniquePath(archiveRoot, path.basename(fallback, SIDECAR_SUFFIX), SIDECAR_SUFFIX),
+        );
+      } catch (err) {
+        console.error('park restore failed', err.message);
+      }
       continue;
     }
 
@@ -309,7 +329,15 @@ function unparkSidecars() {
     } catch (err) {
       console.error('bad sidecar json', parkPath, err.message);
       failed += 1;
-      fs.renameSync(parkPath, dest);
+      // Never drop a bad sidecar onto an existing dest — park under a unique name.
+      try {
+        renameNoClobber(
+          parkPath,
+          uniquePath(archiveRoot, path.basename(newAbs) + '.bad-sidecar', '.json'),
+        );
+      } catch (e2) {
+        console.error('bad sidecar quarantine failed', e2.message);
+      }
       continue;
     }
 
@@ -326,8 +354,13 @@ function unparkSidecars() {
       continue;
     }
     fs.writeFileSync(parkPath, `${ JSON.stringify(doc) }\n`);
-    fs.renameSync(parkPath, dest);
-    ok += 1;
+    try {
+      renameNoClobber(parkPath, dest);
+      ok += 1;
+    } catch (err) {
+      console.error('sidecar publish failed', err.message);
+      failed += 1;
+    }
   }
   console.log('sidecars restored', { ok, failed });
   return failed;

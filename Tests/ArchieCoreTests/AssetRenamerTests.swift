@@ -247,6 +247,43 @@ final class AssetRenamerTests: XCTestCase {
         XCTAssertTrue(exists(newSide))
     }
 
+    func testSidecarDestExistsRefusesClobber() throws {
+        let heic = try writeMedia(name: "IMG_6006.HEIC", bytes: Data([0x66]))
+        let assetId = "asset-side-clobber"
+        let side = try writeSidecar(
+            assetId: assetId,
+            media: [(type: "photo", path: heic.name, sha: heic.sha, size: heic.size)]
+        )
+        try appendBasicManifest(assetId: assetId, heic: heic, side: side)
+
+        let foreignSide = "2020-01-15_14h30m45s.heic.asset.json"
+        let foreignBytes = Data("{\"foreign\":true}\n".utf8)
+        try foreignBytes.write(to: root.appendingPathComponent(foreignSide))
+
+        XCTAssertThrowsError(
+            try AssetRenamer.settle(
+                archiveRoot: root,
+                assetId: assetId,
+                creationDate: creationDate,
+                resources: [
+                    SettledResource(relativePath: heic.name, sha256: heic.sha, isSidecar: false),
+                    SettledResource(relativePath: side.name, sha256: side.sha, isSidecar: true),
+                ],
+                manifest: manifest
+            )
+        ) { err in
+            guard case AssetRenamerError.destExists = err else {
+                XCTFail("expected destExists, got \(err)")
+                return
+            }
+        }
+
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(foreignSide)), foreignBytes)
+        XCTAssertTrue(exists(heic.name))
+        XCTAssertTrue(exists(side.name))
+        XCTAssertFalse(exists("2020-01-15_14h30m45s.heic"))
+    }
+
     func testHashMismatchLeavesFilesUntouched() throws {
         let heic = try writeMedia(name: "IMG_4004.HEIC", bytes: Data([0x44]))
         let assetId = "asset-hash"
