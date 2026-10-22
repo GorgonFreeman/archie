@@ -115,36 +115,36 @@ public final class TransferClient: @unchecked Sendable {
         }
     }
 
-    /// Favourite assetIds already verified on the Mac (skip on re-import).
-    public func fetchFavouritesSeen() async throws -> Set<String> {
+    /// Protected assetIds already verified on the Mac (skip on re-import while still protected).
+    public func fetchProtectedSeen() async throws -> Set<String> {
         guard let io else { throw TransferError.notConnected }
-        try await io.send(type: .favouritesSeenFetch)
+        try await io.send(type: .protectedSeenFetch)
         let (type, payload) = try await io.receive()
         switch type {
-        case .favouritesSeenResult:
-            let body = try MessageCodec.decode(FavouritesSeenPayload.self, from: payload)
+        case .protectedSeenResult:
+            let body = try MessageCodec.decode(ProtectedSeenPayload.self, from: payload)
             return Set(body.assetIds)
         case .fail:
             let fail = try MessageCodec.decode(FailPayload.self, from: payload)
             throw TransferError.rejected(fail.reason)
         default:
-            throw TransferError.protocolError("expected FAVOURITES_SEEN_RESULT")
+            throw TransferError.protocolError("expected PROTECTED_SEEN_RESULT")
         }
     }
 
-    /// Record a favourite that just verified + settled (Mac appends to `.favourites_seen_log`).
-    public func markFavouriteSeen(assetId: String) async throws {
+    /// Record a protected asset that just verified + settled (Mac appends to `.protected_seen_log`).
+    public func markProtectedSeen(assetId: String) async throws {
         guard let io else { throw TransferError.notConnected }
-        try await io.sendJSON(type: .favouriteSeenMark, value: FavouriteSeenPayload(assetId: assetId))
+        try await io.sendJSON(type: .protectedSeenMark, value: ProtectedSeenMarkPayload(assetId: assetId))
         let (type, payload) = try await io.receive()
         switch type {
-        case .favouritesSeenResult:
-            _ = try MessageCodec.decode(FavouritesSeenPayload.self, from: payload)
+        case .protectedSeenResult:
+            _ = try MessageCodec.decode(ProtectedSeenPayload.self, from: payload)
         case .fail:
             let fail = try MessageCodec.decode(FailPayload.self, from: payload)
             throw TransferError.rejected(fail.reason)
         default:
-            throw TransferError.protocolError("expected FAVOURITES_SEEN_RESULT")
+            throw TransferError.protocolError("expected PROTECTED_SEEN_RESULT")
         }
     }
 

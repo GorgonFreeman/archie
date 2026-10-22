@@ -16,12 +16,12 @@ public enum FrameType: UInt8, Sendable {
     case archiveIndexResult = 11
     /// Mac → Phone: `ArchiveIndexProgressPayload` (deltas while verifying).
     case archiveIndexProgress = 12
-    /// Phone → Mac: request favourite assetIds already verified in the archive.
-    case favouritesSeenFetch = 13
-    /// Mac → Phone: `FavouritesSeenPayload`.
-    case favouritesSeenResult = 14
-    /// Phone → Mac: mark one favourite as verified (`FavouriteSeenPayload`); Mac acks with result frame (single id).
-    case favouriteSeenMark = 15
+    /// Phone → Mac: request protected assetIds already verified in the archive.
+    case protectedSeenFetch = 13
+    /// Mac → Phone: `ProtectedSeenPayload`.
+    case protectedSeenResult = 14
+    /// Phone → Mac: mark one protected asset as verified (`ProtectedSeenMarkPayload`); Mac acks with result.
+    case protectedSeenMark = 15
 }
 
 public struct HelloPayload: Codable, Sendable {
@@ -156,7 +156,7 @@ public struct ArchiveIndexProgressPayload: Codable, Sendable {
     }
 }
 
-public struct FavouritesSeenPayload: Codable, Sendable {
+public struct ProtectedSeenPayload: Codable, Sendable {
     public var assetIds: [String]
 
     public init(assetIds: [String]) {
@@ -164,7 +164,7 @@ public struct FavouritesSeenPayload: Codable, Sendable {
     }
 }
 
-public struct FavouriteSeenPayload: Codable, Sendable {
+public struct ProtectedSeenMarkPayload: Codable, Sendable {
     public var assetId: String
 
     public init(assetId: String) {

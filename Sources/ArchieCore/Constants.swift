@@ -8,6 +8,8 @@ public enum ArchieConstants {
     public static let tmpDirName = ".archie-tmp"
     public static let manifestName = "manifest.jsonl"
     public static let archiveLockName = ".archie-archive.lock"
-    public static let favouritesSeenLogName = ".favourites_seen_log"
+    public static let protectedSeenLogName = ".protected_seen_log"
+    /// Migrated once into `protectedSeenLogName`.
+    public static let legacyFavouritesSeenLogName = ".favourites_seen_log"
     public static let sidecarSuffix = ".asset.json"
 }

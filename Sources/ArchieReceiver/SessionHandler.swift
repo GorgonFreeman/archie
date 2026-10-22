@@ -43,10 +43,10 @@ final class SessionHandler {
                     try await settleAsset(payload)
                 case .archiveIndex:
                     try await sendArchiveIndex()
-                case .favouritesSeenFetch:
-                    try await sendFavouritesSeen()
-                case .favouriteSeenMark:
-                    try await markFavouriteSeen(payload)
+                case .protectedSeenFetch:
+                    try await sendProtectedSeen()
+                case .protectedSeenMark:
+                    try await markProtectedSeen(payload)
                 case .sessionEnd:
                     fputs("session end\n", stderr)
                     return
@@ -145,34 +145,34 @@ final class SessionHandler {
         currentBegin = nil
     }
 
-    private func sendFavouritesSeen() async throws {
+    private func sendProtectedSeen() async throws {
         do {
-            let ids = try FavouritesSeenLog.loadMergingSidecars(archiveRoot: archiveRoot)
+            let ids = try ProtectedSeenLog.loadMergingSidecars(archiveRoot: archiveRoot)
             try await io.sendJSON(
-                type: .favouritesSeenResult,
-                value: FavouritesSeenPayload(assetIds: Array(ids).sorted())
+                type: .protectedSeenResult,
+                value: ProtectedSeenPayload(assetIds: Array(ids).sorted())
             )
-            fputs("favourites seen: \(ids.count)\n", stderr)
+            fputs("protected seen: \(ids.count)\n", stderr)
         } catch {
             try await io.sendJSON(
                 type: .fail,
-                value: FailPayload(reason: "favourites log: \(error.localizedDescription)")
+                value: FailPayload(reason: "protected log: \(error.localizedDescription)")
             )
         }
     }
 
-    private func markFavouriteSeen(_ payload: Data) async throws {
-        let request = try MessageCodec.decode(FavouriteSeenPayload.self, from: payload)
+    private func markProtectedSeen(_ payload: Data) async throws {
+        let request = try MessageCodec.decode(ProtectedSeenMarkPayload.self, from: payload)
         do {
-            try FavouritesSeenLog.record(assetId: request.assetId, archiveRoot: archiveRoot)
+            try ProtectedSeenLog.record(assetId: request.assetId, archiveRoot: archiveRoot)
             try await io.sendJSON(
-                type: .favouritesSeenResult,
-                value: FavouritesSeenPayload(assetIds: [request.assetId])
+                type: .protectedSeenResult,
+                value: ProtectedSeenPayload(assetIds: [request.assetId])
             )
         } catch {
             try await io.sendJSON(
                 type: .fail,
-                value: FailPayload(reason: "favourites mark: \(error.localizedDescription)")
+                value: FailPayload(reason: "protected mark: \(error.localizedDescription)")
             )
         }
     }

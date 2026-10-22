@@ -30,7 +30,7 @@ Deletion is available through the "Delete Verified" button at any time, or will 
 
 ## Protecting photos
 
-User has a toggle per album to "protect" photos. This means don't delete after import. Favourites is also supported as an option and is on by default. Once a favourite verifies on the Mac, its asset id is recorded in `.favourites_seen_log` in the archive and skipped on later imports.
+User has a toggle per album to "protect" photos. This means don't delete after import. Favourites is also supported as an option and is on by default. Once a protected asset (favourite or protected album) verifies on the Mac, its asset id is recorded in `.protected_seen_log` in the archive and skipped on later imports while still protected.
 
 ## Pause
 

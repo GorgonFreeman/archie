@@ -161,15 +161,21 @@ final class ImportCoordinator: ObservableObject {
             return
         }
 
-        status = "Loading seen favourites…"
-        let seenFavourites: Set<String>
+        status = "Loading protected-seen log…"
+        let protectedSeen: Set<String>
         do {
-            seenFavourites = try await client.fetchFavouritesSeen()
+            protectedSeen = try await client.fetchProtectedSeen()
         } catch {
-            status = "Favourites log failed: \(error.localizedDescription)"
+            status = "Protected-seen log failed: \(error.localizedDescription)"
             try? await client.endSession()
             return
         }
+
+        let protection = ProtectionPolicy(
+            protectFavourites: settings.protectFavourites,
+            protectedAlbumIds: Set(settings.protectedAlbumIds)
+        )
+        let protectedByAlbum = Self.assetIdsInProtectedAlbums(settings: settings)
 
         let opts = PHFetchOptions()
         opts.includeHiddenAssets = true
@@ -178,18 +184,23 @@ final class ImportCoordinator: ObservableObject {
         let fetch = PHAsset.fetchAssets(with: opts)
 
         var assets: [PHAsset] = []
-        var skippedSeenFavourites = 0
+        var skippedProtectedSeen = 0
         fetch.enumerateObjects { asset, _, _ in
-            if asset.isFavorite && seenFavourites.contains(asset.localIdentifier) {
-                skippedSeenFavourites += 1
+            let protectedNow = Self.isProtected(
+                asset,
+                policy: protection,
+                protectedByAlbum: protectedByAlbum
+            )
+            if protectedNow && protectedSeen.contains(asset.localIdentifier) {
+                skippedProtectedSeen += 1
                 return
             }
             assets.append(asset)
         }
         total = assets.count
         progress = 0
-        if skippedSeenFavourites > 0 {
-            status = "Skipping \(skippedSeenFavourites) seen favourites…"
+        if skippedProtectedSeen > 0 {
+            status = "Skipping \(skippedProtectedSeen) already-imported protected assets…"
         }
 
         pendingDeletes.removeAll(keepingCapacity: true)
@@ -218,7 +229,12 @@ final class ImportCoordinator: ObservableObject {
             }
             progress += 1
             status = "Asset \(progress)/\(total)"
-            let settled = await transferAndSettle(asset, client: client)
+            let settled = await transferAndSettle(
+                asset,
+                client: client,
+                protection: protection,
+                protectedByAlbum: protectedByAlbum
+            )
             recordTransfer(settled.outcome)
             if let copy = settled.copy {
                 pendingDeletes.append(copy)
@@ -391,7 +407,9 @@ final class ImportCoordinator: ObservableObject {
     /// Transfer → settle; defer delete so many assets share one Photos confirmation.
     private func transferAndSettle(
         _ asset: PHAsset,
-        client: TransferClient
+        client: TransferClient,
+        protection: ProtectionPolicy,
+        protectedByAlbum: Set<String>
     ) async -> SettledTransfer {
         switch await transferVerified(asset, client: client) {
         case .failure(let reason, let bytes):
@@ -420,9 +438,9 @@ final class ImportCoordinator: ObservableObject {
                     copy: nil
                 )
             }
-            if asset.isFavorite {
-                // Best-effort: skip on next import even though we retain on phone.
-                try? await client.markFavouriteSeen(assetId: copy.assetId)
+            if Self.isProtected(asset, policy: protection, protectedByAlbum: protectedByAlbum) {
+                // Best-effort: skip on next import while still protected on phone.
+                try? await client.markProtectedSeen(assetId: copy.assetId)
             }
             // Placeholder until batch delete runs — counts as verified, not yet deleted/retained.
             return SettledTransfer(
@@ -436,6 +454,33 @@ final class ImportCoordinator: ObservableObject {
                 copy: copy
             )
         }
+    }
+
+    private static func isProtected(
+        _ asset: PHAsset,
+        policy: ProtectionPolicy,
+        protectedByAlbum: Set<String>
+    ) -> Bool {
+        if policy.protectFavourites && asset.isFavorite { return true }
+        return protectedByAlbum.contains(asset.localIdentifier)
+    }
+
+    private static func assetIdsInProtectedAlbums(settings: SettingsStore) -> Set<String> {
+        let albumIds = settings.protectedAlbumIds
+        guard !albumIds.isEmpty else { return [] }
+        var out = Set<String>()
+        for albumId in albumIds {
+            let collections = PHAssetCollection.fetchAssetCollections(
+                withLocalIdentifiers: [albumId],
+                options: nil
+            )
+            guard let collection = collections.firstObject else { continue }
+            let fetch = PHAsset.fetchAssets(in: collection, options: nil)
+            fetch.enumerateObjects { asset, _, _ in
+                out.insert(asset.localIdentifier)
+            }
+        }
+        return out
     }
 
     private func applyScanProgress(_ progress: ArchiveIndexProgressPayload) {

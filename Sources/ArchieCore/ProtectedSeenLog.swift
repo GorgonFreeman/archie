@@ -1,13 +1,19 @@
 import Foundation
 
-/// Append-only log of favourite asset IDs that verified as transferred.
-/// Lives at `<archive>/.favourites_seen_log` (one assetId per line).
-public enum FavouritesSeenLog {
+/// Append-only log of protected asset IDs that verified as transferred (kept on phone).
+/// Lives at `<archive>/.protected_seen_log` (one assetId per line).
+/// Migrates legacy `.favourites_seen_log` on first access.
+public enum ProtectedSeenLog {
     public static func url(in archiveRoot: URL) -> URL {
-        archiveRoot.appendingPathComponent(ArchieConstants.favouritesSeenLogName)
+        archiveRoot.appendingPathComponent(ArchieConstants.protectedSeenLogName)
+    }
+
+    private static func legacyUrl(in archiveRoot: URL) -> URL {
+        archiveRoot.appendingPathComponent(ArchieConstants.legacyFavouritesSeenLogName)
     }
 
     public static func load(archiveRoot: URL) -> Set<String> {
+        migrateLegacyIfNeeded(archiveRoot: archiveRoot)
         let path = url(in: archiveRoot)
         guard let text = try? String(contentsOf: path, encoding: .utf8) else { return [] }
         var out = Set<String>()
@@ -18,22 +24,23 @@ public enum FavouritesSeenLog {
         return out
     }
 
-    /// Record a verified favourite. Idempotent.
+    /// Record a verified protected asset. Idempotent.
     public static func record(assetId: String, archiveRoot: URL) throws {
         let id = assetId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }
         try ArchiveLock.withLock(archiveRoot: archiveRoot) {
-            var known = load(archiveRoot: archiveRoot)
+            migrateLegacyIfNeeded(archiveRoot: archiveRoot)
+            let known = loadUnlocked(archiveRoot: archiveRoot)
             guard !known.contains(id) else { return }
-            known.insert(id)
             try appendLine(id, archiveRoot: archiveRoot)
         }
     }
 
-    /// Load log, merge favourite assetIds from sidecars (no hash verify), persist new lines, return full set.
+    /// Load log, merge favourite assetIds from sidecars (prior transfers), persist new lines, return full set.
     public static func loadMergingSidecars(archiveRoot: URL) throws -> Set<String> {
         try ArchiveLock.withLock(archiveRoot: archiveRoot) {
-            var known = load(archiveRoot: archiveRoot)
+            migrateLegacyIfNeeded(archiveRoot: archiveRoot)
+            var known = loadUnlocked(archiveRoot: archiveRoot)
             let fromSidecars = favouriteAssetIdsFromSidecars(archiveRoot: archiveRoot)
             let missing = fromSidecars.subtracting(known)
             for id in missing.sorted() {
@@ -42,6 +49,26 @@ public enum FavouritesSeenLog {
             }
             return known
         }
+    }
+
+    private static func loadUnlocked(archiveRoot: URL) -> Set<String> {
+        let path = url(in: archiveRoot)
+        guard let text = try? String(contentsOf: path, encoding: .utf8) else { return [] }
+        var out = Set<String>()
+        for line in text.split(whereSeparator: \.isNewline) {
+            let id = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !id.isEmpty { out.insert(id) }
+        }
+        return out
+    }
+
+    private static func migrateLegacyIfNeeded(archiveRoot: URL) {
+        let neu = url(in: archiveRoot)
+        let old = legacyUrl(in: archiveRoot)
+        guard !FileManager.default.fileExists(atPath: neu.path),
+              FileManager.default.fileExists(atPath: old.path)
+        else { return }
+        try? FileManager.default.moveItem(at: old, to: neu)
     }
 
     private static func appendLine(_ assetId: String, archiveRoot: URL) throws {
@@ -60,7 +87,7 @@ public enum FavouritesSeenLog {
         }
     }
 
-    /// Sidecar `isFavorite == true` only — presence of sidecar implies a prior transfer attempt.
+    /// Sidecar `isFavorite == true` — those were kept on phone as protected favourites.
     private static func favouriteAssetIdsFromSidecars(archiveRoot: URL) -> Set<String> {
         guard let enumerator = FileManager.default.enumerator(
             at: archiveRoot,
