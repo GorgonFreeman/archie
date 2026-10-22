@@ -22,6 +22,10 @@ public enum FrameType: UInt8, Sendable {
     case protectedSeenResult = 14
     /// Phone → Mac: mark one protected asset as verified (`ProtectedSeenMarkPayload`); Mac acks with result.
     case protectedSeenMark = 15
+    /// Phone → Mac: liveness probe (empty payload).
+    case ping = 16
+    /// Mac → Phone: liveness ack (empty payload).
+    case pong = 17
 }
 
 public struct HelloPayload: Codable, Sendable {

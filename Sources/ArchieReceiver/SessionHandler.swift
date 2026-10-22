@@ -47,6 +47,8 @@ final class SessionHandler {
                     try await sendProtectedSeen()
                 case .protectedSeenMark:
                     try await markProtectedSeen(payload)
+                case .ping:
+                    try await io.send(type: .pong)
                 case .sessionEnd:
                     fputs("session end\n", stderr)
                     return

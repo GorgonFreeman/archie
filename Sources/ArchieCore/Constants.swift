@@ -12,4 +12,8 @@ public enum ArchieConstants {
     /// Migrated once into `protectedSeenLogName`.
     public static let legacyFavouritesSeenLogName = ".favourites_seen_log"
     public static let sidecarSuffix = ".asset.json"
+    /// Max wait for a normal reply (hello, settle, ping, receipt after send).
+    public static let ioTimeoutNanoseconds: UInt64 = 120_000_000_000
+    /// Short probe used before resume.
+    public static let pingTimeoutNanoseconds: UInt64 = 5_000_000_000
 }

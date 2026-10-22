@@ -10,10 +10,16 @@ public final class TransferClient: @unchecked Sendable {
     private var connection: NWConnection?
     private var io: ClientIO?
     private var readyCont: CheckedContinuation<Void, Error>?
+    private var alive = false
 
     public init(pin: String, deviceName: String) {
         self.pin = pin
         self.deviceName = deviceName
+    }
+
+    /// False after the NWConnection fails/cancels or IO is closed.
+    public var isAlive: Bool {
+        queue.sync { alive && !(io?.isClosed ?? true) }
     }
 
     public func connect() async throws {
@@ -26,7 +32,7 @@ public final class TransferClient: @unchecked Sendable {
             type: .hello,
             value: HelloPayload(role: "iphone", pin: pin, deviceName: deviceName)
         )
-        let (type, payload) = try await io.receive()
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
         switch type {
         case .hello:
             _ = try MessageCodec.decode(HelloPayload.self, from: payload)
@@ -35,6 +41,16 @@ public final class TransferClient: @unchecked Sendable {
             throw TransferError.rejected(fail.reason)
         default:
             throw TransferError.protocolError("expected HELLO ack")
+        }
+    }
+
+    /// Cheap liveness check (used before resume). Throws `connectionLost` if the link is dead.
+    public func ping() async throws {
+        guard isAlive, let io else { throw TransferError.connectionLost("not connected") }
+        try await io.send(type: .ping)
+        let (type, _) = try await io.receive(timeoutNanoseconds: ArchieConstants.pingTimeoutNanoseconds)
+        guard type == .pong else {
+            throw TransferError.protocolError("expected PONG")
         }
     }
 
@@ -51,7 +67,7 @@ public final class TransferClient: @unchecked Sendable {
             type: .resourceEnd,
             value: ResourceEndPayload(sha256: begin.declaredSha256, size: begin.size)
         )
-        let (type, payload) = try await io.receive()
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
         switch type {
         case .receipt:
             let receipt = try MessageCodec.decode(ReceiptPayload.self, from: payload)
@@ -74,7 +90,7 @@ public final class TransferClient: @unchecked Sendable {
     public func settleAsset(assetId: String) async throws -> AssetSettledPayload {
         guard let io else { throw TransferError.notConnected }
         try await io.sendJSON(type: .assetSettle, value: AssetSettlePayload(assetId: assetId))
-        let (type, payload) = try await io.receive()
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
         switch type {
         case .assetSettled:
             let settled = try MessageCodec.decode(AssetSettledPayload.self, from: payload)
@@ -97,7 +113,8 @@ public final class TransferClient: @unchecked Sendable {
         guard let io else { throw TransferError.notConnected }
         try await io.send(type: .archiveIndex)
         while true {
-            let (type, payload) = try await io.receive()
+            // Long verify: wait indefinitely between progress frames, but fail if the socket dies.
+            let (type, payload) = try await io.receive(timeoutNanoseconds: nil)
             switch type {
             case .archiveIndexProgress:
                 let progress = try MessageCodec.decode(ArchiveIndexProgressPayload.self, from: payload)
@@ -119,7 +136,7 @@ public final class TransferClient: @unchecked Sendable {
     public func fetchProtectedSeen() async throws -> Set<String> {
         guard let io else { throw TransferError.notConnected }
         try await io.send(type: .protectedSeenFetch)
-        let (type, payload) = try await io.receive()
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
         switch type {
         case .protectedSeenResult:
             let body = try MessageCodec.decode(ProtectedSeenPayload.self, from: payload)
@@ -136,7 +153,7 @@ public final class TransferClient: @unchecked Sendable {
     public func markProtectedSeen(assetId: String) async throws {
         guard let io else { throw TransferError.notConnected }
         try await io.sendJSON(type: .protectedSeenMark, value: ProtectedSeenMarkPayload(assetId: assetId))
-        let (type, payload) = try await io.receive()
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
         switch type {
         case .protectedSeenResult:
             _ = try MessageCodec.decode(ProtectedSeenPayload.self, from: payload)
@@ -151,6 +168,7 @@ public final class TransferClient: @unchecked Sendable {
     public func endSession() async throws {
         try await io?.send(type: .sessionEnd)
         connection?.cancel()
+        queue.sync { alive = false }
     }
 
     private func startBrowser() {
@@ -184,11 +202,19 @@ public final class TransferClient: @unchecked Sendable {
             guard let self else { return }
             switch state {
             case .ready:
+                self.alive = true
                 io.start()
                 self.readyCont?.resume()
                 self.readyCont = nil
             case .failed(let error):
-                self.readyCont?.resume(throwing: error)
+                self.alive = false
+                io.noteClosed(TransferError.connectionLost(error.localizedDescription))
+                self.readyCont?.resume(throwing: TransferError.connectionLost(error.localizedDescription))
+                self.readyCont = nil
+            case .cancelled:
+                self.alive = false
+                io.noteClosed(TransferError.connectionLost("cancelled"))
+                self.readyCont?.resume(throwing: TransferError.connectionLost("cancelled"))
                 self.readyCont = nil
             default:
                 break
@@ -200,14 +226,23 @@ public final class TransferClient: @unchecked Sendable {
 
 public enum TransferError: Error, LocalizedError {
     case notConnected
+    case connectionLost(String)
     case rejected(String)
     case protocolError(String)
 
     public var errorDescription: String? {
         switch self {
         case .notConnected: return "not connected"
+        case .connectionLost(let m): return "connection lost: \(m)"
         case .rejected(let r): return r
         case .protocolError(let m): return m
+        }
+    }
+
+    public var isConnectionLost: Bool {
+        switch self {
+        case .notConnected, .connectionLost: return true
+        default: return false
         }
     }
 }
@@ -220,6 +255,8 @@ final class ClientIO: @unchecked Sendable {
     private var waiters: [CheckedContinuation<(FrameType, Data), Error>] = []
     private var closed: Error?
 
+    var isClosed: Bool { queue.sync { closed != nil } }
+
     init(connection: NWConnection, queue: DispatchQueue) {
         self.connection = connection
         self.queue = queue
@@ -227,12 +264,22 @@ final class ClientIO: @unchecked Sendable {
 
     func start() { receiveLoop() }
 
+    func noteClosed(_ error: Error) {
+        queue.async { self.fail(error) }
+    }
+
     func send(type: FrameType, payload: Data = Data()) async throws {
+        if let closed = queue.sync(execute: { self.closed }) {
+            throw closed
+        }
         let frame = FrameCodec.encode(type: type, payload: payload)
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             connection.send(content: frame, completion: .contentProcessed { error in
-                if let error { cont.resume(throwing: error) }
-                else { cont.resume() }
+                if let error {
+                    cont.resume(throwing: TransferError.connectionLost(error.localizedDescription))
+                } else {
+                    cont.resume()
+                }
             })
         }
     }
@@ -241,7 +288,24 @@ final class ClientIO: @unchecked Sendable {
         try await send(type: type, payload: MessageCodec.encode(value))
     }
 
-    func receive() async throws -> (FrameType, Data) {
+    /// `timeoutNanoseconds` nil = wait until frame or connection failure.
+    func receive(timeoutNanoseconds: UInt64?) async throws -> (FrameType, Data) {
+        if let timeoutNanoseconds {
+            return try await withThrowingTaskGroup(of: (FrameType, Data).self) { group in
+                group.addTask { try await self.receiveOnce() }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    throw TransferError.connectionLost("timed out waiting for reply")
+                }
+                let result = try await group.next()!
+                group.cancelAll()
+                return result
+            }
+        }
+        return try await receiveOnce()
+    }
+
+    private func receiveOnce() async throws -> (FrameType, Data) {
         try await withCheckedThrowingContinuation { cont in
             queue.async {
                 if let closed = self.closed {
@@ -261,7 +325,7 @@ final class ClientIO: @unchecked Sendable {
             guard let self else { return }
             self.queue.async {
                 if let error {
-                    self.fail(error)
+                    self.fail(TransferError.connectionLost(error.localizedDescription))
                     return
                 }
                 if let content {
@@ -275,7 +339,7 @@ final class ClientIO: @unchecked Sendable {
                     }
                 }
                 if isComplete {
-                    self.fail(TransferError.protocolError("connection closed"))
+                    self.fail(TransferError.connectionLost("connection closed"))
                     return
                 }
                 self.receiveLoop()
@@ -284,6 +348,7 @@ final class ClientIO: @unchecked Sendable {
     }
 
     private func fail(_ error: Error) {
+        guard closed == nil else { return }
         closed = error
         let w = waiters
         waiters.removeAll()

@@ -30,6 +30,9 @@ final class ImportCoordinator: ObservableObject {
     private var leftoverReadyIds: [String] = []
     private var scanIncompleteSkipped = 0
     private var isDeletingVerified = false
+    /// Live import session client (for resume ping / abort).
+    private var activeClient: TransferClient?
+    private var stopBecauseConnectionLost = false
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -64,8 +67,27 @@ final class ImportCoordinator: ObservableObject {
             continuePastRecentMonth()
             return
         }
-        isPaused = false
-        status = "Resuming…"
+        status = "Checking connection…"
+        Task { await resumeAfterConnectionCheck() }
+    }
+
+    private func resumeAfterConnectionCheck() async {
+        guard isRunning, isPaused else { return }
+        guard let client = activeClient else {
+            stopBecauseConnectionLost = true
+            isPaused = false
+            status = "Connection lost — stop and restart import"
+            return
+        }
+        do {
+            try await client.ping()
+            isPaused = false
+            status = "Resuming…"
+        } catch {
+            stopBecauseConnectionLost = true
+            isPaused = false
+            status = "Connection lost — stop and restart import"
+        }
     }
 
     /// Delete whatever is verified and ready (import queue and/or leftover scan).
@@ -136,9 +158,12 @@ final class ImportCoordinator: ObservableObject {
         guard !isRunning, !isScanning else { return }
         isRunning = true
         isPaused = false
+        stopBecauseConnectionLost = false
         defer {
             isRunning = false
             isPaused = false
+            activeClient = nil
+            stopBecauseConnectionLost = false
             UIApplication.shared.isIdleTimerDisabled = false
         }
         UIApplication.shared.isIdleTimerDisabled = true
@@ -160,6 +185,7 @@ final class ImportCoordinator: ObservableObject {
             status = "Connect failed: \(error.localizedDescription)"
             return
         }
+        activeClient = client
 
         status = "Loading protected-seen log…"
         let protectedSeen: Set<String>
@@ -212,6 +238,10 @@ final class ImportCoordinator: ObservableObject {
         var offeredRecentMonthGate = false
 
         for asset in assets {
+            if stopBecauseConnectionLost || !client.isAlive {
+                status = "Stopped — connection lost (restart import when Mac is ready)"
+                break
+            }
             if !offeredRecentMonthGate,
                let recentMonthStart,
                let created = asset.creationDate,
@@ -220,12 +250,19 @@ final class ImportCoordinator: ObservableObject {
                 await pauseForRecentMonth(monthStart: recentMonthStart)
             }
             while isPaused {
+                if stopBecauseConnectionLost {
+                    break
+                }
                 // Flush is scheduled once on pause / when the in-flight asset settles.
                 // Do not re-flush every tick — that races the Photos prompt and drops the queue.
                 status = pendingDeletes.isEmpty
                     ? "Paused at \(progress)/\(total)"
                     : "Paused — \(pendingDeletes.count) verified waiting to delete"
                 try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            if stopBecauseConnectionLost {
+                status = "Stopped — connection lost (restart import when Mac is ready)"
+                break
             }
             progress += 1
             status = "Asset \(progress)/\(total)"
@@ -235,14 +272,21 @@ final class ImportCoordinator: ObservableObject {
                 protection: protection,
                 protectedByAlbum: protectedByAlbum
             )
-            recordTransfer(settled.outcome)
-            if let copy = settled.copy {
-                pendingDeletes.append(copy)
-                publishVerifiedReadyCount()
-                // If user paused mid-asset, offer delete as soon as this one settles too.
-                if isPaused {
-                    status = "Paused — confirming delete of \(pendingDeletes.count)…"
-                    scheduleFlushDeletes()
+            if case .connectionLost = settled {
+                stopBecauseConnectionLost = true
+                status = "Stopped — connection lost (restart import when Mac is ready)"
+                break
+            }
+            if case .ok(let outcome, let copy) = settled {
+                recordTransfer(outcome)
+                if let copy {
+                    pendingDeletes.append(copy)
+                    publishVerifiedReadyCount()
+                    // If user paused mid-asset, offer delete as soon as this one settles too.
+                    if isPaused {
+                        status = "Paused — confirming delete of \(pendingDeletes.count)…"
+                        scheduleFlushDeletes()
+                    }
                 }
             }
         }
@@ -398,10 +442,9 @@ final class ImportCoordinator: ObservableObject {
         publishVerifiedReadyCount()
     }
 
-    private struct SettledTransfer {
-        var outcome: AssetOutcome
-        /// Non-nil when verified + settled and eligible to queue for delete.
-        var copy: VerifiedCopy?
+    private enum SettledTransfer {
+        case ok(AssetOutcome, copy: VerifiedCopy?)
+        case connectionLost
     }
 
     /// Transfer → settle; defer delete so many assets share one Photos confirmation.
@@ -412,9 +455,11 @@ final class ImportCoordinator: ObservableObject {
         protectedByAlbum: Set<String>
     ) async -> SettledTransfer {
         switch await transferVerified(asset, client: client) {
+        case .connectionLost:
+            return .connectionLost
         case .failure(let reason, let bytes):
-            return SettledTransfer(
-                outcome: AssetOutcome(
+            return .ok(
+                AssetOutcome(
                     id: asset.localIdentifier,
                     bytes: bytes,
                     verified: false,
@@ -427,8 +472,11 @@ final class ImportCoordinator: ObservableObject {
             do {
                 _ = try await client.settleAsset(assetId: copy.assetId)
             } catch {
-                return SettledTransfer(
-                    outcome: AssetOutcome(
+                if Self.isConnectionLost(error) || !client.isAlive {
+                    return .connectionLost
+                }
+                return .ok(
+                    AssetOutcome(
                         id: copy.assetId,
                         bytes: copy.bytes,
                         verified: true,
@@ -443,8 +491,8 @@ final class ImportCoordinator: ObservableObject {
                 try? await client.markProtectedSeen(assetId: copy.assetId)
             }
             // Placeholder until batch delete runs — counts as verified, not yet deleted/retained.
-            return SettledTransfer(
-                outcome: AssetOutcome(
+            return .ok(
+                AssetOutcome(
                     id: copy.assetId,
                     bytes: copy.bytes,
                     verified: true,
@@ -454,6 +502,11 @@ final class ImportCoordinator: ObservableObject {
                 copy: copy
             )
         }
+    }
+
+    private static func isConnectionLost(_ error: Error) -> Bool {
+        if let transfer = error as? TransferError { return transfer.isConnectionLost }
+        return false
     }
 
     private static func isProtected(
@@ -576,6 +629,7 @@ final class ImportCoordinator: ObservableObject {
     private enum TransferResult {
         case success(VerifiedCopy)
         case failure(RetainReason, bytes: Int64)
+        case connectionLost
     }
 
     /// Returns `VerifiedCopy` only when every media resource and the sidecar have matching RECEIPTs.
@@ -583,6 +637,7 @@ final class ImportCoordinator: ObservableObject {
         _ asset: PHAsset,
         client: TransferClient
     ) async -> TransferResult {
+        guard client.isAlive else { return .connectionLost }
         let exported: [ExportedResource]
         do {
             exported = try await ResourceExporter.exportAll(for: asset)
@@ -625,6 +680,9 @@ final class ImportCoordinator: ObservableObject {
                 ))
                 bytes += receipt.size
             } catch {
+                if Self.isConnectionLost(error) || !client.isAlive {
+                    return .connectionLost
+                }
                 return .failure(.failed, bytes: bytes)
             }
         }
@@ -661,6 +719,9 @@ final class ImportCoordinator: ObservableObject {
                 relativePath: receipt.relativePath
             ))
         } catch {
+            if Self.isConnectionLost(error) || !client.isAlive {
+                return .connectionLost
+            }
             return .failure(.sidecarFailed, bytes: bytes)
         }
 
@@ -685,6 +746,9 @@ final class ImportCoordinator: ObservableObject {
                 return try await client.sendResource(begin: begin, bytes: fileChunkStream(file))
             } catch {
                 last = error
+                if Self.isConnectionLost(error) || !client.isAlive {
+                    throw error
+                }
             }
         }
         throw last
