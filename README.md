@@ -4,10 +4,12 @@ Copy photos and videos from an iPhone to a Mac. Verify each file with SHA-256, t
 
 ## Mac receiver
 
-Writes **flat** into the archive root (no `YYYY/MM/` nesting):
+Writes **flat** into the archive root (no `YYYY/MM/` nesting).
 
 ```bash
-swift run archie-receiver ~/Pictures/ArchieArchive
+pnpm start    # build release receiver, start it, print PIN
+pnpm status
+pnpm stop
 ```
 
 ### Start automatically when an iPhone is plugged in
@@ -21,7 +23,6 @@ Checks USB every 5s. On connect it starts the receiver, shows a notification wit
 Also installs a **menu bar** app: click **Archie** for the PIN (and Copy). While the receiver is live the PIN appears in the menu bar title too.
 
 ```bash
-./scripts/watch_iphone_receiver.sh --status
 ./scripts/uninstall_launch_agent.sh
 ```
 
@@ -47,7 +48,7 @@ From this repo (phone plugged in and unlocked):
 pnpm redeploy
 ```
 
-Override team/device with `ARCHIE_DEVELOPMENT_TEAM` / `ARCHIE_DEVICE`.
+On build failure, the script prints the last lines of `/tmp/archie-dd/archie-build.log`. Override team/device with `ARCHIE_DEVELOPMENT_TEAM` / `ARCHIE_DEVICE`.
 
 Xcode works too: open `Apps/Archie.xcodeproj`, set your development team, Run on a device. Enter the PIN shown by the receiver.
 

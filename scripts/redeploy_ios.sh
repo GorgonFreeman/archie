@@ -14,6 +14,7 @@ SCHEME="Archie"
 TEAM="${ARCHIE_DEVELOPMENT_TEAM:-3RA377US5A}"
 DERIVED="${ARCHIE_DERIVED_DATA:-/tmp/archie-dd}"
 BUNDLE_ID="com.manuscanis.archie"
+BUILD_LOG="${DERIVED}/archie-build.log"
 
 die() {
   echo "error: $*" >&2
@@ -72,10 +73,11 @@ DEVICE_NAME="${DEVICE_NAME:-${DEVICE_ID}}"
 
 echo "device: ${DEVICE_NAME} (${DEVICE_ID})"
 echo "team:   ${TEAM}"
-echo "building…"
+echo "building… (log: ${BUILD_LOG})"
 
 mkdir -p "${DERIVED}"
-xcodebuild \
+# Capture full log; -quiet hides progress but we dump the tail on failure.
+if ! xcodebuild \
   -project "${PROJECT}" \
   -scheme "${SCHEME}" \
   -destination "platform=iOS,id=${DEVICE_ID}" \
@@ -84,24 +86,37 @@ xcodebuild \
   DEVELOPMENT_TEAM="${TEAM}" \
   -derivedDataPath "${DERIVED}" \
   -quiet \
-  build
+  build >"${BUILD_LOG}" 2>&1
+then
+  echo "error: xcodebuild failed — last 80 lines of ${BUILD_LOG}:" >&2
+  tail -n 80 "${BUILD_LOG}" >&2 || true
+  exit 1
+fi
 
-APP="$(
-  find "${DERIVED}/Build/Products" -name 'Archie.app' -type d 2>/dev/null \
-    | grep -v 'iphonesimulator' \
-    | head -1
-)"
-[[ -n "${APP}" && -d "${APP}" ]] || die "Archie.app not found under ${DERIVED}/Build/Products"
+APP="${DERIVED}/Build/Products/Debug-iphoneos/Archie.app"
+if [[ ! -d "${APP}" ]]; then
+  # Fallback if configuration name differs.
+  APP="$(
+    find "${DERIVED}/Build/Products" -path '*iphoneos*/Archie.app' -type d 2>/dev/null \
+      | head -1
+  )"
+fi
+[[ -n "${APP}" && -d "${APP}" ]] || die "Archie.app not found under ${DERIVED}/Build/Products (see ${BUILD_LOG})"
 
 echo "installing ${APP}…"
-xcrun devicectl device install app \
+if ! xcrun devicectl device install app \
   --device "${DEVICE_ID}" \
   "${APP}"
+then
+  die "install failed — unlock the phone, trust this Mac, and retry"
+fi
 
 echo "launching ${BUNDLE_ID}…"
-xcrun devicectl device process launch \
+if ! xcrun devicectl device process launch \
   --device "${DEVICE_ID}" \
-  "${BUNDLE_ID}" \
-  >/dev/null 2>&1 || echo "(installed; open Archie on the phone if launch was blocked)"
+  "${BUNDLE_ID}"
+then
+  echo "warning: launch failed — open Archie on the phone (unlock if locked)" >&2
+fi
 
 echo "redeployed ✓  unlock the phone if Photos/network prompts appear"

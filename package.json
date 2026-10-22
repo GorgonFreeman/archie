@@ -2,6 +2,9 @@
   "name": "archie",
   "private": true,
   "scripts": {
-    "redeploy": "./scripts/redeploy_ios.sh"
+    "start": "bash ./scripts/start_receiver.sh",
+    "stop": "bash ./scripts/watch_iphone_receiver.sh --stop",
+    "status": "bash ./scripts/watch_iphone_receiver.sh --status",
+    "redeploy": "bash ./scripts/redeploy_ios.sh"
   }
 }
