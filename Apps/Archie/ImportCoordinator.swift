@@ -10,8 +10,12 @@ final class ImportCoordinator: ObservableObject {
     @Published var summary = ImportSummary()
     @Published var isRunning = false
     @Published var isPaused = false
+    /// Verified+settled assets waiting for a Photos delete confirmation.
+    @Published private(set) var pendingDeleteCount = 0
 
     private let settings: SettingsStore
+    private var pendingDeletes: [VerifiedCopy] = []
+    private var flushTask: Task<Void, Never>?
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -20,13 +24,26 @@ final class ImportCoordinator: ObservableObject {
     func pause() {
         guard isRunning else { return }
         isPaused = true
-        status = "Paused — finishing current asset, then holding"
+        // Do not wait for the in-flight asset — prompt delete for everything already verified.
+        if pendingDeletes.isEmpty {
+            status = "Paused — finishing current asset, then holding"
+        } else {
+            status = "Paused — confirming delete of \(pendingDeletes.count)…"
+            scheduleFlushDeletes()
+        }
     }
 
     func resume() {
         guard isRunning else { return }
         isPaused = false
         status = "Resuming…"
+    }
+
+    /// Manual flush while paused (e.g. more assets finished after the first prompt).
+    func deleteVerifiedNow() {
+        guard isRunning, isPaused, !pendingDeletes.isEmpty else { return }
+        status = "Paused — confirming delete of \(pendingDeletes.count)…"
+        scheduleFlushDeletes()
     }
 
     func run(pin: String) async {
@@ -67,16 +84,20 @@ final class ImportCoordinator: ObservableObject {
         var assets: [PHAsset] = []
         fetch.enumerateObjects { asset, _, _ in assets.append(asset) }
 
-        // Queue verified copies; delete only on pause or when the run finishes.
-        var pendingDeletes: [VerifiedCopy] = []
+        pendingDeletes.removeAll(keepingCapacity: true)
+        pendingDeleteCount = 0
+        flushTask?.cancel()
+        flushTask = nil
 
         for asset in assets {
             while isPaused {
                 if !pendingDeletes.isEmpty {
                     status = "Paused — confirming delete of \(pendingDeletes.count)…"
-                    await flushDeletes(&pendingDeletes)
+                    await flushPendingDeletes()
                 }
-                status = "Paused at \(progress)/\(total)"
+                status = pendingDeletes.isEmpty
+                    ? "Paused at \(progress)/\(total)"
+                    : "Paused — \(pendingDeletes.count) verified waiting to delete"
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
             progress += 1
@@ -85,16 +106,81 @@ final class ImportCoordinator: ObservableObject {
             recordTransfer(settled.outcome)
             if let copy = settled.copy {
                 pendingDeletes.append(copy)
+                pendingDeleteCount = pendingDeletes.count
+                // If user paused mid-asset, offer delete as soon as this one settles too.
+                if isPaused {
+                    status = "Paused — confirming delete of \(pendingDeletes.count)…"
+                    scheduleFlushDeletes()
+                }
             }
         }
 
+        // Wait for any in-flight pause flush, then drain the rest at end.
+        if let flushTask {
+            await flushTask.value
+        }
         if !pendingDeletes.isEmpty {
             status = "Confirm delete of \(pendingDeletes.count)…"
-            await flushDeletes(&pendingDeletes)
+            await flushPendingDeletes()
         }
 
         try? await client.endSession()
         status = "Finished — deleted \(summary.deleted), retained \(summary.retained)"
+    }
+
+    private func scheduleFlushDeletes() {
+        let batch = pendingDeletes
+        guard !batch.isEmpty else { return }
+        pendingDeletes.removeAll(keepingCapacity: true)
+        pendingDeleteCount = 0
+        let previous = flushTask
+        flushTask = Task { @MainActor in
+            // Serialize Photos prompts — don't cancel an in-flight confirmation.
+            await previous?.value
+            guard !Task.isCancelled else { return }
+            await self.applyDeleteResults(batch)
+            if self.isPaused {
+                self.status = self.pendingDeletes.isEmpty
+                    ? "Paused at \(self.progress)/\(self.total)"
+                    : "Paused — \(self.pendingDeletes.count) verified waiting to delete"
+            }
+        }
+    }
+
+    private func flushPendingDeletes() async {
+        let batch = pendingDeletes
+        pendingDeletes.removeAll(keepingCapacity: true)
+        pendingDeleteCount = 0
+        guard !batch.isEmpty else { return }
+        await applyDeleteResults(batch)
+    }
+
+    private func applyDeleteResults(_ batch: [VerifiedCopy]) async {
+        let results = await DeletionService.deleteVerifiedBatch(batch, settings: settings)
+        for copy in batch {
+            let result = results[copy.assetId] ?? .retained(.failed)
+            let deleted: Bool
+            let reason: RetainReason?
+            switch result {
+            case .deleted:
+                deleted = true
+                reason = nil
+                summary.deleted += 1
+            case .retained(let r):
+                deleted = false
+                reason = r
+                summary.retained += 1
+            }
+            if let idx = summary.outcomes.firstIndex(where: { $0.id == copy.assetId }) {
+                summary.outcomes[idx] = AssetOutcome(
+                    id: copy.assetId,
+                    bytes: copy.bytes,
+                    verified: true,
+                    deleted: deleted,
+                    retainReason: reason
+                )
+            }
+        }
     }
 
     private struct SettledTransfer {
@@ -161,38 +247,6 @@ final class ImportCoordinator: ObservableObject {
         // Pending deletes have verified=true, retainReason=nil — counted in flushDeletes.
         if !outcome.deleted && (outcome.retainReason != nil || !outcome.verified) {
             summary.retained += 1
-        }
-    }
-
-    private func flushDeletes(_ pending: inout [VerifiedCopy]) async {
-        let batch = pending
-        pending.removeAll(keepingCapacity: true)
-        guard !batch.isEmpty else { return }
-
-        let results = await DeletionService.deleteVerifiedBatch(batch, settings: settings)
-        for copy in batch {
-            let result = results[copy.assetId] ?? .retained(.failed)
-            let deleted: Bool
-            let reason: RetainReason?
-            switch result {
-            case .deleted:
-                deleted = true
-                reason = nil
-                summary.deleted += 1
-            case .retained(let r):
-                deleted = false
-                reason = r
-                summary.retained += 1
-            }
-            if let idx = summary.outcomes.firstIndex(where: { $0.id == copy.assetId }) {
-                summary.outcomes[idx] = AssetOutcome(
-                    id: copy.assetId,
-                    bytes: copy.bytes,
-                    verified: true,
-                    deleted: deleted,
-                    retainReason: reason
-                )
-            }
         }
     }
 

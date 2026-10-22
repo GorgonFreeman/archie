@@ -29,16 +29,21 @@ struct RootView: View {
                             if importer.isPaused { importer.resume() }
                             else { importer.pause() }
                         }
+                        if importer.isPaused && importer.pendingDeleteCount > 0 {
+                            Button("Delete \(importer.pendingDeleteCount) verified now") {
+                                importer.deleteVerifiedNow()
+                            }
+                        }
                     }
                     Text(importer.status)
                         .foregroundStyle(.secondary)
                     if importer.total > 0 {
                         ProgressView(value: Double(importer.progress), total: Double(importer.total))
                     }
-                    Text("Deletes on pause or when finished. Live Photos: still only (no paired video).")
+                    Text("Pause deletes verified so far immediately (doesn’t wait for the current asset). Live Photos: still only.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
+                    }
 
                 Section("Protection") {
                     Toggle("Protect favourites", isOn: $settings.protectFavourites)

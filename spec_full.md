@@ -82,7 +82,7 @@ An asset is **eligible** only if all of the following hold:
 - It is not protected, evaluated **fresh at delete time** (favourite flag and album membership re-read from PhotoKit).
 - Photos authorization is **full access**. Under limited access, the app never deletes.
 
-Eligible assets are deleted with `PHAssetChangeRequest.deleteAssets` only when the user **pauses** or the import **finishes** (all verified-since-last-flush assets in one call). iOS shows one confirmation prompt per flush; that prompt cannot be suppressed. Deleted items go to Recently Deleted for 30 days.
+Eligible assets are deleted with `PHAssetChangeRequest.deleteAssets` when the user **pauses** or the import **finishes**. On pause, the Photos confirmation runs **immediately** for assets already verified (does not wait for the in-flight asset). iOS shows one confirmation prompt per flush; that prompt cannot be suppressed. Deleted items go to Recently Deleted for 30 days.
 
 Deletion is gated by a `VerifiedCopy` proof type that can only be built when every media resource and the sidecar have a Mac RECEIPT whose hash and size match what the phone sent. No proof → no delete. Protection and full-access checks run fresh immediately before each delete. A disconnect, crash, failed transfer, or declined Photos prompt leaves that asset on the phone.
 
