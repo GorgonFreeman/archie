@@ -20,11 +20,14 @@ final class ImportCoordinator: ObservableObject {
     @Published private(set) var auditTotal = 0
     /// Leftovers verified so far (on phone) and not yet deleted — drives live delete button.
     @Published private(set) var auditReadyCount = 0
+    /// Soft stop before importing the newest calendar month (favorite first).
+    @Published var recentMonthOffer: RecentMonthOffer?
 
     private let settings: SettingsStore
     private var pendingDeletes: [VerifiedCopy] = []
     private var flushTask: Task<Void, Never>?
     private var leftoverDecision: CheckedContinuation<Bool, Never>?
+    private var recentMonthDecision: CheckedContinuation<Void, Never>?
     private var auditReadyIds: [String] = []
     private var auditIncompleteSkipped = 0
     private var isAuditDeleting = false
@@ -38,6 +41,11 @@ final class ImportCoordinator: ObservableObject {
         let assetIds: [String]
         let incompleteSkipped: Int
         var count: Int { assetIds.count }
+    }
+
+    struct RecentMonthOffer: Identifiable {
+        let id = UUID()
+        let monthLabel: String
     }
 
     func pause() {
@@ -54,6 +62,10 @@ final class ImportCoordinator: ObservableObject {
 
     func resume() {
         guard isRunning else { return }
+        if recentMonthDecision != nil {
+            continuePastRecentMonth()
+            return
+        }
         isPaused = false
         status = "Resuming…"
     }
@@ -71,6 +83,17 @@ final class ImportCoordinator: ObservableObject {
         leftoverDecision?.resume(returning: delete)
         leftoverDecision = nil
         leftoverOffer = nil
+    }
+
+    /// Continue past the newest-month gate (after favouriting).
+    func continuePastRecentMonth() {
+        recentMonthDecision?.resume()
+        recentMonthDecision = nil
+        recentMonthOffer = nil
+        if isRunning {
+            isPaused = false
+            status = "Resuming recent month…"
+        }
     }
 
     /// Delete leftovers verified so far during a streaming archive audit (does not stop verify).
@@ -154,7 +177,17 @@ final class ImportCoordinator: ObservableObject {
         flushTask?.cancel()
         flushTask = nil
 
+        let recentMonthStart = Self.startOfNewestMonth(in: assets)
+        var offeredRecentMonthGate = false
+
         for asset in assets {
+            if !offeredRecentMonthGate,
+               let recentMonthStart,
+               let created = asset.creationDate,
+               created >= recentMonthStart {
+                offeredRecentMonthGate = true
+                await pauseForRecentMonth(monthStart: recentMonthStart)
+            }
             while isPaused {
                 if !pendingDeletes.isEmpty {
                     status = "Paused — confirming delete of \(pendingDeletes.count)…"
@@ -191,6 +224,34 @@ final class ImportCoordinator: ObservableObject {
 
         try? await client.endSession()
         status = "Finished — deleted \(summary.deleted), retained \(summary.retained)"
+    }
+
+    /// First calendar month that contains the newest asset — pause before importing it.
+    private static func startOfNewestMonth(in assets: [PHAsset]) -> Date? {
+        guard let newest = assets.compactMap(\.creationDate).max() else { return nil }
+        let cal = Calendar.current
+        let parts = cal.dateComponents([.year, .month], from: newest)
+        return cal.date(from: parts)
+    }
+
+    private static func monthLabel(for monthStart: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: monthStart)
+    }
+
+    private func pauseForRecentMonth(monthStart: Date) async {
+        let label = Self.monthLabel(for: monthStart)
+        isPaused = true
+        if !pendingDeletes.isEmpty {
+            status = "Paused — confirming delete of \(pendingDeletes.count)…"
+            await flushPendingDeletes()
+        }
+        status = "Paused — reached \(label); favourite then continue"
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            recentMonthDecision = cont
+            recentMonthOffer = RecentMonthOffer(monthLabel: label)
+        }
     }
 
     private func scheduleFlushDeletes() {

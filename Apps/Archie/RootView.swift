@@ -60,7 +60,7 @@ struct RootView: View {
                     if importer.total > 0 {
                         ProgressView(value: Double(importer.progress), total: Double(importer.total))
                     }
-                    Text("Delete verified as they arrive during audit or import. Pause still flushes immediately; end of run asks for any leftover.")
+                    Text("Delete verified as they arrive during audit or import. Import pauses before the newest month so you can favourite first.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -116,6 +116,17 @@ struct RootView: View {
                     },
                     secondaryButton: .cancel(Text("Keep")) {
                         importer.respondToLeftoverOffer(delete: false)
+                    }
+                )
+            }
+            .alert(item: $importer.recentMonthOffer) { offer in
+                Alert(
+                    title: Text("Reached \(offer.monthLabel)"),
+                    message: Text(
+                        "Import paused before the most recent month so you can favourite anything you still want to keep. Protected favourites/albums are skipped on delete. Continue when ready."
+                    ),
+                    dismissButton: .default(Text("Continue")) {
+                        importer.continuePastRecentMonth()
                     }
                 )
             }
