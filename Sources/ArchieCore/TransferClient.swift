@@ -115,6 +115,39 @@ public final class TransferClient: @unchecked Sendable {
         }
     }
 
+    /// Favourite assetIds already verified on the Mac (skip on re-import).
+    public func fetchFavouritesSeen() async throws -> Set<String> {
+        guard let io else { throw TransferError.notConnected }
+        try await io.send(type: .favouritesSeenFetch)
+        let (type, payload) = try await io.receive()
+        switch type {
+        case .favouritesSeenResult:
+            let body = try MessageCodec.decode(FavouritesSeenPayload.self, from: payload)
+            return Set(body.assetIds)
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected FAVOURITES_SEEN_RESULT")
+        }
+    }
+
+    /// Record a favourite that just verified + settled (Mac appends to `.favourites_seen_log`).
+    public func markFavouriteSeen(assetId: String) async throws {
+        guard let io else { throw TransferError.notConnected }
+        try await io.sendJSON(type: .favouriteSeenMark, value: FavouriteSeenPayload(assetId: assetId))
+        let (type, payload) = try await io.receive()
+        switch type {
+        case .favouritesSeenResult:
+            _ = try MessageCodec.decode(FavouritesSeenPayload.self, from: payload)
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected FAVOURITES_SEEN_RESULT")
+        }
+    }
+
     public func endSession() async throws {
         try await io?.send(type: .sessionEnd)
         connection?.cancel()

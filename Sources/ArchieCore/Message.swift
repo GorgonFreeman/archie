@@ -16,6 +16,12 @@ public enum FrameType: UInt8, Sendable {
     case archiveIndexResult = 11
     /// Mac → Phone: `ArchiveIndexProgressPayload` (deltas while verifying).
     case archiveIndexProgress = 12
+    /// Phone → Mac: request favourite assetIds already verified in the archive.
+    case favouritesSeenFetch = 13
+    /// Mac → Phone: `FavouritesSeenPayload`.
+    case favouritesSeenResult = 14
+    /// Phone → Mac: mark one favourite as verified (`FavouriteSeenPayload`); Mac acks with result frame (single id).
+    case favouriteSeenMark = 15
 }
 
 public struct HelloPayload: Codable, Sendable {
@@ -147,6 +153,22 @@ public struct ArchiveIndexProgressPayload: Codable, Sendable {
         self.incompleteCount = incompleteCount
         self.completeAssetIds = completeAssetIds
         self.finished = finished
+    }
+}
+
+public struct FavouritesSeenPayload: Codable, Sendable {
+    public var assetIds: [String]
+
+    public init(assetIds: [String]) {
+        self.assetIds = assetIds
+    }
+}
+
+public struct FavouriteSeenPayload: Codable, Sendable {
+    public var assetId: String
+
+    public init(assetId: String) {
+        self.assetId = assetId
     }
 }
 

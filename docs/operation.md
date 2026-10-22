@@ -4,7 +4,7 @@
 
 1. Plug in iPhone (or `pnpm start`) — Mac receiver runs; note the PIN (notification / menu bar / `pnpm status`).
 2. Open Archie on the phone, enter PIN.
-3. **Import** — copy library to Mac; **Delete Verified** when ready. Pauses before the newest month.
+3. **Import** — copy library to Mac; **Delete Verified** when ready. Pauses before the newest month. Seen favourites (`.favourites_seen_log` in the archive) are skipped so protected favourites are not reimported.
 4. **Scan leftovers** — verify archive on Mac, queue matching phone assets for **Delete Verified**.
 
 `pnpm stop` / `pnpm status` as needed.

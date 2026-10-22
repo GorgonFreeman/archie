@@ -43,6 +43,10 @@ final class SessionHandler {
                     try await settleAsset(payload)
                 case .archiveIndex:
                     try await sendArchiveIndex()
+                case .favouritesSeenFetch:
+                    try await sendFavouritesSeen()
+                case .favouriteSeenMark:
+                    try await markFavouriteSeen(payload)
                 case .sessionEnd:
                     fputs("session end\n", stderr)
                     return
@@ -139,6 +143,38 @@ final class SessionHandler {
         }
         self.writer = nil
         currentBegin = nil
+    }
+
+    private func sendFavouritesSeen() async throws {
+        do {
+            let ids = try FavouritesSeenLog.loadMergingSidecars(archiveRoot: archiveRoot)
+            try await io.sendJSON(
+                type: .favouritesSeenResult,
+                value: FavouritesSeenPayload(assetIds: Array(ids).sorted())
+            )
+            fputs("favourites seen: \(ids.count)\n", stderr)
+        } catch {
+            try await io.sendJSON(
+                type: .fail,
+                value: FailPayload(reason: "favourites log: \(error.localizedDescription)")
+            )
+        }
+    }
+
+    private func markFavouriteSeen(_ payload: Data) async throws {
+        let request = try MessageCodec.decode(FavouriteSeenPayload.self, from: payload)
+        do {
+            try FavouritesSeenLog.record(assetId: request.assetId, archiveRoot: archiveRoot)
+            try await io.sendJSON(
+                type: .favouritesSeenResult,
+                value: FavouritesSeenPayload(assetIds: [request.assetId])
+            )
+        } catch {
+            try await io.sendJSON(
+                type: .fail,
+                value: FailPayload(reason: "favourites mark: \(error.localizedDescription)")
+            )
+        }
     }
 
     private func sendArchiveIndex() async throws {

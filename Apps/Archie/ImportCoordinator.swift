@@ -161,16 +161,36 @@ final class ImportCoordinator: ObservableObject {
             return
         }
 
+        status = "Loading seen favourites…"
+        let seenFavourites: Set<String>
+        do {
+            seenFavourites = try await client.fetchFavouritesSeen()
+        } catch {
+            status = "Favourites log failed: \(error.localizedDescription)"
+            try? await client.endSession()
+            return
+        }
+
         let opts = PHFetchOptions()
         opts.includeHiddenAssets = true
         opts.includeAllBurstAssets = true
         opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
         let fetch = PHAsset.fetchAssets(with: opts)
-        total = fetch.count
-        progress = 0
 
         var assets: [PHAsset] = []
-        fetch.enumerateObjects { asset, _, _ in assets.append(asset) }
+        var skippedSeenFavourites = 0
+        fetch.enumerateObjects { asset, _, _ in
+            if asset.isFavorite && seenFavourites.contains(asset.localIdentifier) {
+                skippedSeenFavourites += 1
+                return
+            }
+            assets.append(asset)
+        }
+        total = assets.count
+        progress = 0
+        if skippedSeenFavourites > 0 {
+            status = "Skipping \(skippedSeenFavourites) seen favourites…"
+        }
 
         pendingDeletes.removeAll(keepingCapacity: true)
         publishVerifiedReadyCount()
@@ -399,6 +419,10 @@ final class ImportCoordinator: ObservableObject {
                     ),
                     copy: nil
                 )
+            }
+            if asset.isFavorite {
+                // Best-effort: skip on next import even though we retain on phone.
+                try? await client.markFavouriteSeen(assetId: copy.assetId)
             }
             // Placeholder until batch delete runs — counts as verified, not yet deleted/retained.
             return SettledTransfer(
