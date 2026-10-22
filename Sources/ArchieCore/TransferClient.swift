@@ -27,8 +27,15 @@ public final class TransferClient: @unchecked Sendable {
             value: HelloPayload(role: "iphone", pin: pin, deviceName: deviceName)
         )
         let (type, payload) = try await io.receive()
-        guard type == .hello else { throw TransferError.protocolError("expected HELLO ack") }
-        _ = try MessageCodec.decode(HelloPayload.self, from: payload)
+        switch type {
+        case .hello:
+            _ = try MessageCodec.decode(HelloPayload.self, from: payload)
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected HELLO ack")
+        }
     }
 
     public func sendResource(

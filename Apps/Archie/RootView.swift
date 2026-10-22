@@ -14,6 +14,18 @@ struct RootView: View {
         _pin = State(initialValue: settings.lastPin)
     }
 
+    private var busy: Bool { importer.isRunning || importer.isScanning }
+    private var canConnect: Bool { pin.count >= 4 }
+    private var scanLabel: String {
+        let n = importer.leftoverReadyCount
+        let base = importer.isScanning ? "Scanning leftovers" : "Scan leftovers"
+        return n > 0 ? "\(base) (\(n))" : base
+    }
+    private var deleteLabel: String {
+        let n = importer.verifiedReadyCount
+        return n > 0 ? "Delete Verified (\(n))" : "Delete Verified"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -21,46 +33,51 @@ struct RootView: View {
                     TextField("PIN", text: $pin)
                         .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
-                    Button(importer.isRunning ? "Importing…" : "Start import") {
+
+                    Button(importer.isRunning ? "Importing…" : "Import") {
                         Task { await importer.run(pin: pin) }
                     }
-                    .disabled(importer.isRunning || pin.count < 4)
-                    Button("Scan archive leftovers") {
-                        Task { await importer.auditArchiveLeftovers(pin: pin) }
+                    .disabled(busy || !canConnect)
+
+                    Button(scanLabel) {
+                        Task { await importer.scanLeftovers(pin: pin) }
                     }
-                    .disabled(importer.isRunning || importer.isAuditing || pin.count < 4)
-                    if importer.isAuditing {
-                        if importer.auditTotal > 0 {
-                            ProgressView(
-                                value: Double(importer.auditScanned),
-                                total: Double(importer.auditTotal)
-                            )
-                        } else {
-                            ProgressView()
-                        }
-                        if importer.auditReadyCount > 0 {
-                            Button("Delete \(importer.auditReadyCount) verified so far") {
-                                importer.deleteAuditLeftoversNow()
-                            }
-                        }
+                    .disabled(busy || !canConnect)
+
+                    Button(deleteLabel) {
+                        importer.deleteVerified()
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .disabled(importer.verifiedReadyCount == 0)
+
                     if importer.isRunning {
                         Button(importer.isPaused ? "Resume" : "Pause") {
                             if importer.isPaused { importer.resume() }
                             else { importer.pause() }
                         }
-                        if importer.pendingDeleteCount > 0 {
-                            Button("Delete \(importer.pendingDeleteCount) verified so far") {
-                                importer.deleteVerifiedNow()
-                            }
-                        }
                     }
+
                     Text(importer.status)
                         .foregroundStyle(.secondary)
-                    if importer.total > 0 {
-                        ProgressView(value: Double(importer.progress), total: Double(importer.total))
+
+                    if importer.isScanning {
+                        if importer.scanTotal > 0 {
+                            ProgressView(
+                                value: Double(importer.scanScanned),
+                                total: Double(importer.scanTotal)
+                            )
+                        } else {
+                            ProgressView()
+                        }
+                    } else if importer.total > 0 {
+                        ProgressView(
+                            value: Double(importer.progress),
+                            total: Double(importer.total)
+                        )
                     }
-                    Text("Delete verified as they arrive during audit or import. Import pauses before the newest month so you can favourite first.")
+
+                    Text("Import copies to the Mac. Scan leftovers verifies the archive and queues matching phone assets for Delete Verified. Import pauses before the newest month so you can favourite first.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -102,23 +119,6 @@ struct RootView: View {
                 }
             }
             .navigationTitle("Archie")
-            .alert(item: $importer.leftoverOffer) { offer in
-                let incompleteNote = offer.incompleteSkipped > 0
-                    ? " \(offer.incompleteSkipped) incomplete archive assets were skipped (will reimport)."
-                    : ""
-                return Alert(
-                    title: Text("Delete verified leftovers?"),
-                    message: Text(
-                        "\(offer.count) assets are fully verified in the Mac archive (every file present, sha256 match) but still on this phone. Delete them now? Protected favourites/albums are skipped.\(incompleteNote)"
-                    ),
-                    primaryButton: .destructive(Text("Delete \(offer.count)")) {
-                        importer.respondToLeftoverOffer(delete: true)
-                    },
-                    secondaryButton: .cancel(Text("Keep")) {
-                        importer.respondToLeftoverOffer(delete: false)
-                    }
-                )
-            }
             .alert(item: $importer.recentMonthOffer) { offer in
                 Alert(
                     title: Text("Reached \(offer.monthLabel)"),
@@ -133,10 +133,6 @@ struct RootView: View {
             .task {
                 _ = await PhotoAccess.request()
                 loadAlbums()
-                // App start: if we have a saved PIN and receiver is up, audit leftovers.
-                if pin.count >= 4 {
-                    await importer.auditArchiveLeftovers(pin: pin)
-                }
             }
         }
     }
