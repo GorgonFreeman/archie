@@ -48,7 +48,8 @@ final class ImportCoordinator: ObservableObject {
     func pause() {
         guard isRunning else { return }
         isPaused = true
-        // Do not wait for the in-flight asset — prompt delete for everything already verified.
+        // Offer delete for everything already verified (Photos confirmation).
+        // Queue is only drained for assets that actually delete — declined stay ready.
         if pendingDeletes.isEmpty {
             status = "Paused — finishing current asset, then holding"
         } else {
@@ -142,7 +143,7 @@ final class ImportCoordinator: ObservableObject {
         }
         UIApplication.shared.isIdleTimerDisabled = true
         summary = ImportSummary()
-        clearLeftoverQueue()
+        // Do not clear leftover queue — Scan leftovers is independent of Import.
 
         _ = await PhotoAccess.request()
         guard PhotoAccess.canImport else {
@@ -188,10 +189,8 @@ final class ImportCoordinator: ObservableObject {
                 await pauseForRecentMonth(monthStart: recentMonthStart)
             }
             while isPaused {
-                if !pendingDeletes.isEmpty {
-                    status = "Paused — confirming delete of \(pendingDeletes.count)…"
-                    await flushPendingDeletes()
-                }
+                // Flush is scheduled once on pause / when the in-flight asset settles.
+                // Do not re-flush every tick — that races the Photos prompt and drops the queue.
                 status = pendingDeletes.isEmpty
                     ? "Paused at \(progress)/\(total)"
                     : "Paused — \(pendingDeletes.count) verified waiting to delete"
@@ -222,7 +221,12 @@ final class ImportCoordinator: ObservableObject {
         }
 
         try? await client.endSession()
-        status = "Finished — deleted \(summary.deleted), retained \(summary.retained)"
+        if pendingDeletes.count + leftoverReadyIds.count > 0 {
+            let n = pendingDeletes.count + leftoverReadyIds.count
+            status = "Finished — \(n) verified still ready to delete"
+        } else {
+            status = "Finished — deleted \(summary.deleted), retained \(summary.retained)"
+        }
     }
 
     /// First calendar month that contains the newest asset — pause before importing it.
@@ -259,16 +263,16 @@ final class ImportCoordinator: ObservableObject {
     }
 
     private func scheduleFlushDeletes() {
-        let batch = pendingDeletes
-        guard !batch.isEmpty else { return }
-        pendingDeletes.removeAll(keepingCapacity: true)
-        publishVerifiedReadyCount()
+        guard !pendingDeletes.isEmpty else { return }
         let previous = flushTask
         flushTask = Task { @MainActor in
             // Serialize Photos prompts — don't cancel an in-flight confirmation.
             await previous?.value
             guard !Task.isCancelled else { return }
-            await self.applyDeleteResults(batch)
+            guard !self.isDeletingVerified else { return }
+            self.isDeletingVerified = true
+            defer { self.isDeletingVerified = false }
+            await self.flushPendingDeletes()
             if self.isPaused {
                 self.status = self.pendingDeletes.isEmpty
                     ? "Paused at \(self.progress)/\(self.total)"
@@ -278,14 +282,14 @@ final class ImportCoordinator: ObservableObject {
                 self.status = pending > 0
                     ? "Asset \(self.progress)/\(self.total) — \(pending) verified ready"
                     : "Asset \(self.progress)/\(self.total)"
+            } else if self.pendingDeletes.count > 0 {
+                self.status = "\(self.pendingDeletes.count) verified ready to delete"
             }
         }
     }
 
     private func flushPendingDeletes() async {
         let batch = pendingDeletes
-        pendingDeletes.removeAll(keepingCapacity: true)
-        publishVerifiedReadyCount()
         guard !batch.isEmpty else { return }
         await applyDeleteResults(batch)
     }
@@ -308,6 +312,9 @@ final class ImportCoordinator: ObservableObject {
 
     private func applyDeleteResults(_ batch: [VerifiedCopy]) async {
         let results = await DeletionService.deleteVerifiedBatch(batch, settings: settings)
+        let batchIds = Set(batch.map(\.assetId))
+        var keep: [VerifiedCopy] = []
+
         for copy in batch {
             let result = results[copy.assetId] ?? .retained(.failed)
             let deleted: Bool
@@ -317,10 +324,26 @@ final class ImportCoordinator: ObservableObject {
                 deleted = true
                 reason = nil
                 summary.deleted += 1
+                if let idx = summary.outcomes.firstIndex(where: { $0.id == copy.assetId }) {
+                    let prev = summary.outcomes[idx]
+                    // Was previously counted as retained (e.g. user declined earlier) — undo.
+                    if prev.retainReason != nil {
+                        summary.retained = max(0, summary.retained - 1)
+                    }
+                }
             case .retained(let r):
                 deleted = false
                 reason = r
-                summary.retained += 1
+                keep.append(copy)
+                if let idx = summary.outcomes.firstIndex(where: { $0.id == copy.assetId }) {
+                    let prev = summary.outcomes[idx]
+                    // Count retained only on first transition so retries do not inflate the total.
+                    if prev.retainReason == nil {
+                        summary.retained += 1
+                    }
+                } else {
+                    summary.retained += 1
+                }
             }
             if let idx = summary.outcomes.firstIndex(where: { $0.id == copy.assetId }) {
                 summary.outcomes[idx] = AssetOutcome(
@@ -332,6 +355,11 @@ final class ImportCoordinator: ObservableObject {
                 )
             }
         }
+
+        // Keep non-batch items + anything not successfully deleted (user can tap Delete Verified again).
+        let others = pendingDeletes.filter { !batchIds.contains($0.assetId) }
+        pendingDeletes = others + keep
+        publishVerifiedReadyCount()
     }
 
     private struct SettledTransfer {
@@ -405,21 +433,29 @@ final class ImportCoordinator: ObservableObject {
 
     private func flushLeftoverReadyDeletes() async -> Int {
         let ids = leftoverReadyIds
-        leftoverReadyIds = []
-        publishVerifiedReadyCount()
         guard !ids.isEmpty else { return 0 }
 
         status = "Deleting \(ids.count) verified leftovers…"
         let results = await DeletionService.deleteArchivedAssetIds(ids, settings: settings)
-        let deleted = results.values.filter {
-            if case .deleted = $0 { return true }
-            return false
-        }.count
+        var remaining: [String] = []
+        var deleted = 0
+        for id in ids {
+            if case .deleted = results[id] {
+                deleted += 1
+            } else {
+                // Declined / protected / failed — keep ready so Delete Verified stays usable.
+                remaining.append(id)
+            }
+        }
+        leftoverReadyIds = remaining
+        publishVerifiedReadyCount()
         summary.deleted += deleted
         if isScanning {
             status = "Verifying archive \(scanScanned)/\(scanTotal) — deleted \(deleted)"
-        } else {
+        } else if remaining.isEmpty {
             status = "Deleted \(deleted) leftovers"
+        } else {
+            status = "Deleted \(deleted) leftovers — \(remaining.count) still ready"
         }
         return deleted
     }
