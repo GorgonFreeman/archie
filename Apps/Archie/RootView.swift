@@ -28,14 +28,29 @@ struct RootView: View {
                     Button("Scan archive leftovers") {
                         Task { await importer.auditArchiveLeftovers(pin: pin) }
                     }
-                    .disabled(importer.isRunning || pin.count < 4)
+                    .disabled(importer.isRunning || importer.isAuditing || pin.count < 4)
+                    if importer.isAuditing {
+                        if importer.auditTotal > 0 {
+                            ProgressView(
+                                value: Double(importer.auditScanned),
+                                total: Double(importer.auditTotal)
+                            )
+                        } else {
+                            ProgressView()
+                        }
+                        if importer.auditReadyCount > 0 {
+                            Button("Delete \(importer.auditReadyCount) verified so far") {
+                                importer.deleteAuditLeftoversNow()
+                            }
+                        }
+                    }
                     if importer.isRunning {
                         Button(importer.isPaused ? "Resume" : "Pause") {
                             if importer.isPaused { importer.resume() }
                             else { importer.pause() }
                         }
-                        if importer.isPaused && importer.pendingDeleteCount > 0 {
-                            Button("Delete \(importer.pendingDeleteCount) verified now") {
+                        if importer.pendingDeleteCount > 0 {
+                            Button("Delete \(importer.pendingDeleteCount) verified so far") {
                                 importer.deleteVerifiedNow()
                             }
                         }
@@ -45,7 +60,7 @@ struct RootView: View {
                     if importer.total > 0 {
                         ProgressView(value: Double(importer.progress), total: Double(importer.total))
                     }
-                    Text("On launch / scan / start import: offer to delete phone assets already in the Mac archive. Pause deletes verified immediately.")
+                    Text("Delete verified as they arrive during audit or import. Pause still flushes immediately; end of run asks for any leftover.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

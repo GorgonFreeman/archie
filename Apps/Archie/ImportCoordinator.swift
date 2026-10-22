@@ -14,11 +14,20 @@ final class ImportCoordinator: ObservableObject {
     @Published private(set) var pendingDeleteCount = 0
     /// Archive leftovers still on the phone — UI presents an alert.
     @Published var leftoverOffer: LeftoverDeleteOffer?
+    /// True while Mac is streaming sidecar SHA-256 verification.
+    @Published private(set) var isAuditing = false
+    @Published private(set) var auditScanned = 0
+    @Published private(set) var auditTotal = 0
+    /// Leftovers verified so far (on phone) and not yet deleted — drives live delete button.
+    @Published private(set) var auditReadyCount = 0
 
     private let settings: SettingsStore
     private var pendingDeletes: [VerifiedCopy] = []
     private var flushTask: Task<Void, Never>?
     private var leftoverDecision: CheckedContinuation<Bool, Never>?
+    private var auditReadyIds: [String] = []
+    private var auditIncompleteSkipped = 0
+    private var isAuditDeleting = false
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -49,10 +58,12 @@ final class ImportCoordinator: ObservableObject {
         status = "Resuming…"
     }
 
-    /// Manual flush while paused (e.g. more assets finished after the first prompt).
+    /// Flush verified imports so far (works while running or paused — same live delete as audit).
     func deleteVerifiedNow() {
-        guard isRunning, isPaused, !pendingDeletes.isEmpty else { return }
-        status = "Paused — confirming delete of \(pendingDeletes.count)…"
+        guard isRunning, !pendingDeletes.isEmpty else { return }
+        status = isPaused
+            ? "Paused — confirming delete of \(pendingDeletes.count)…"
+            : "Deleting \(pendingDeletes.count) verified…"
         scheduleFlushDeletes()
     }
 
@@ -62,9 +73,15 @@ final class ImportCoordinator: ObservableObject {
         leftoverOffer = nil
     }
 
-    /// Connect to Mac, list archive assetIds, offer delete for those still on the phone.
+    /// Delete leftovers verified so far during a streaming archive audit (does not stop verify).
+    func deleteAuditLeftoversNow() {
+        guard auditReadyCount > 0, !isAuditDeleting else { return }
+        Task { _ = await flushAuditReadyDeletes() }
+    }
+
+    /// Connect to Mac, stream-verify archive, offer live + final delete for leftovers on phone.
     func auditArchiveLeftovers(pin: String) async {
-        guard !isRunning else { return }
+        guard !isRunning, !isAuditing else { return }
         guard pin.count >= 4 else {
             status = "Enter PIN to audit archive"
             return
@@ -83,6 +100,8 @@ final class ImportCoordinator: ObservableObject {
         try? await client.endSession()
         if deleted > 0 {
             status = "Audit done — deleted \(deleted) leftovers"
+        } else if auditIncompleteSkipped > 0 {
+            status = "Audit done — no leftovers (\(auditIncompleteSkipped) incomplete skipped)"
         } else {
             status = "Audit done — no leftovers on phone"
         }
@@ -189,6 +208,11 @@ final class ImportCoordinator: ObservableObject {
                 self.status = self.pendingDeletes.isEmpty
                     ? "Paused at \(self.progress)/\(self.total)"
                     : "Paused — \(self.pendingDeletes.count) verified waiting to delete"
+            } else if self.isRunning {
+                let pending = self.pendingDeletes.count
+                self.status = pending > 0
+                    ? "Asset \(self.progress)/\(self.total) — \(pending) verified ready"
+                    : "Asset \(self.progress)/\(self.total)"
             }
         }
     }
@@ -283,43 +307,91 @@ final class ImportCoordinator: ObservableObject {
 
     /// Returns number deleted (0 if none / declined / none found).
     private func offerDeleteForArchiveLeftovers(client: TransferClient) async -> Int {
-        let index: ArchiveIndexPayload
+        isAuditing = true
+        auditScanned = 0
+        auditTotal = 0
+        auditReadyIds = []
+        auditReadyCount = 0
+        auditIncompleteSkipped = 0
+        defer {
+            isAuditing = false
+        }
+
+        var deletedDuring = 0
         do {
             status = "Verifying archive (sha256)…"
-            index = try await client.fetchArchiveIndex()
+            try await client.streamArchiveIndex { progress in
+                await self.applyAuditProgress(progress)
+            }
         } catch {
             status = "Archive verify failed: \(error.localizedDescription)"
-            return 0
+            return deletedDuring
         }
 
-        let leftovers = Self.archivedAssetsStillOnPhone(
-            archiveIds: index.assetIds,
-            settings: settings
-        )
-        if leftovers.isEmpty {
-            if index.incompleteCount > 0 {
-                status = "No leftovers — \(index.incompleteCount) incomplete archive assets skipped"
-            }
-            return 0
+        // Hide streaming UI; final alert owns remaining leftovers.
+        isAuditing = false
+
+        // Anything already flushed via the live button is gone from auditReadyIds.
+        if auditReadyIds.isEmpty {
+            return deletedDuring
         }
 
+        let leftovers = auditReadyIds
         let shouldDelete = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             leftoverDecision = cont
             leftoverOffer = LeftoverDeleteOffer(
                 assetIds: leftovers,
-                incompleteSkipped: index.incompleteCount
+                incompleteSkipped: auditIncompleteSkipped
             )
             status = "Found \(leftovers.count) verified leftovers on phone"
         }
-        guard shouldDelete else { return 0 }
+        guard shouldDelete else {
+            auditReadyIds = []
+            auditReadyCount = 0
+            return deletedDuring
+        }
 
-        status = "Deleting \(leftovers.count) leftovers…"
-        let results = await DeletionService.deleteArchivedAssetIds(leftovers, settings: settings)
+        deletedDuring += await flushAuditReadyDeletes()
+        return deletedDuring
+    }
+
+    private func applyAuditProgress(_ progress: ArchiveIndexProgressPayload) {
+        let onPhone = Self.archivedAssetsStillOnPhone(
+            archiveIds: progress.completeAssetIds,
+            settings: settings
+        )
+        auditScanned = progress.scanned
+        auditTotal = progress.total
+        auditIncompleteSkipped = progress.incompleteCount
+        if !onPhone.isEmpty {
+            auditReadyIds.append(contentsOf: onPhone)
+            auditReadyCount = auditReadyIds.count
+        }
+        let readyNote = auditReadyCount > 0 ? " — \(auditReadyCount) ready to delete" : ""
+        status = "Verifying archive \(progress.scanned)/\(progress.total)\(readyNote)"
+    }
+
+    private func flushAuditReadyDeletes() async -> Int {
+        guard !isAuditDeleting else { return 0 }
+        isAuditDeleting = true
+        defer { isAuditDeleting = false }
+
+        let ids = auditReadyIds
+        auditReadyIds = []
+        auditReadyCount = 0
+        guard !ids.isEmpty else { return 0 }
+
+        status = "Deleting \(ids.count) verified leftovers…"
+        let results = await DeletionService.deleteArchivedAssetIds(ids, settings: settings)
         let deleted = results.values.filter {
             if case .deleted = $0 { return true }
             return false
         }.count
         summary.deleted += deleted
+        if isAuditing {
+            status =
+                "Verifying archive \(auditScanned)/\(auditTotal) — deleted \(deleted)"
+        }
         return deleted
     }
 

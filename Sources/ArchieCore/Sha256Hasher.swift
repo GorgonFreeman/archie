@@ -22,8 +22,15 @@ public final class Sha256Hasher: @unchecked Sendable {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         let hasher = Sha256Hasher()
+        // Smaller chunks + autoreleasepool keep peak memory flat on huge archive scans.
+        let chunkLen = min(ArchieConstants.chunkSize, 256 * 1024)
         while true {
-            let chunk = handle.readData(ofLength: ArchieConstants.chunkSize)
+            let chunk: Data = try autoreleasepool {
+                if let data = try handle.read(upToCount: chunkLen) {
+                    return data
+                }
+                return Data()
+            }
             if chunk.isEmpty { break }
             hasher.update(chunk)
         }

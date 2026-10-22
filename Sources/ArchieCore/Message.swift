@@ -10,10 +10,12 @@ public enum FrameType: UInt8, Sendable {
     case sessionEnd = 7
     case assetSettle = 8
     case assetSettled = 9
-    /// Phone → Mac: list assetIds present in the archive (from sidecars).
+    /// Phone → Mac: start streaming archive verification.
     case archiveIndex = 10
-    /// Mac → Phone: `ArchiveIndexPayload`.
+    /// Mac → Phone: final ack after progress stream (`ArchiveIndexPayload`, assetIds usually empty).
     case archiveIndexResult = 11
+    /// Mac → Phone: `ArchiveIndexProgressPayload` (deltas while verifying).
+    case archiveIndexProgress = 12
 }
 
 public struct HelloPayload: Codable, Sendable {
@@ -115,14 +117,36 @@ public struct AssetSettledPayload: Codable, Sendable {
 }
 
 public struct ArchiveIndexPayload: Codable, Sendable {
-    /// Only assets whose sidecar resources all exist and match sha256.
+    /// Legacy/final field — prefer progress deltas; may be empty when streaming.
     public var assetIds: [String]
-    /// Sidecars that failed verification (noted; not offered for phone delete).
     public var incompleteCount: Int
 
     public init(assetIds: [String], incompleteCount: Int = 0) {
         self.assetIds = assetIds
         self.incompleteCount = incompleteCount
+    }
+}
+
+public struct ArchiveIndexProgressPayload: Codable, Sendable {
+    public var scanned: Int
+    public var total: Int
+    public var incompleteCount: Int
+    /// Newly verified-complete assetIds since last progress frame.
+    public var completeAssetIds: [String]
+    public var finished: Bool
+
+    public init(
+        scanned: Int,
+        total: Int,
+        incompleteCount: Int,
+        completeAssetIds: [String],
+        finished: Bool
+    ) {
+        self.scanned = scanned
+        self.total = total
+        self.incompleteCount = incompleteCount
+        self.completeAssetIds = completeAssetIds
+        self.finished = finished
     }
 }
 

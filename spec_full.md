@@ -82,9 +82,9 @@ An asset is **eligible** only if all of the following hold:
 - It is not protected, evaluated **fresh at delete time** (favourite flag and album membership re-read from PhotoKit).
 - Photos authorization is **full access**. Under limited access, the app never deletes.
 
-Eligible assets are deleted with `PHAssetChangeRequest.deleteAssets` when the user **pauses** or the import **finishes**. On pause, the Photos confirmation runs **immediately** for assets already verified (does not wait for the in-flight asset). iOS shows one confirmation prompt per flush; that prompt cannot be suppressed. Deleted items go to Recently Deleted for 30 days.
+Eligible assets are deleted with `PHAssetChangeRequest.deleteAssets` when the user taps **Delete N verified so far** during import, **pauses**, or the import **finishes**. The live button works while importing (same pattern as leftover audit). On pause, the Photos confirmation also runs immediately for assets already verified. iOS shows one confirmation prompt per flush; that prompt cannot be suppressed. Deleted items go to Recently Deleted for 30 days.
 
-**Leftover audit** (app launch / scan / start of import): the Mac re-reads every sidecar and only returns asset IDs whose listed resources **all exist** and **match SHA-256** (and size when declared). Incomplete archive assets are counted and skipped — not offered for phone delete.
+**Leftover audit** (app launch / scan / start of import): the Mac streams per-sidecar SHA-256 verification (low memory) with progress frames. The phone filters each complete delta against the library and shows a live **Delete N verified so far** button; incomplete archive assets are counted and skipped.
 
 Deletion is gated by a `VerifiedCopy` proof type that can only be built when every media resource and the sidecar have a Mac RECEIPT whose hash and size match what the phone sent. No proof → no delete. Protection and full-access checks run fresh immediately before each delete. A disconnect, crash, failed transfer, or declined Photos prompt leaves that asset on the phone.
 

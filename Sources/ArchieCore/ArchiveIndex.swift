@@ -1,47 +1,90 @@
 import Foundation
 
-public struct ArchiveIndexReport: Sendable {
-    /// Sidecars whose every listed resource exists and matches sha256.
-    public var completeAssetIds: [String]
-    /// Sidecars that failed existence/hash checks (logged; not safe to delete from phone).
+public struct ArchiveIndexProgress: Sendable {
+    public var scanned: Int
+    public var total: Int
     public var incompleteCount: Int
+    /// Newly verified-complete assetIds since the previous progress event (delta).
+    public var completeAssetIds: [String]
+    public var finished: Bool
+
+    public init(
+        scanned: Int,
+        total: Int,
+        incompleteCount: Int,
+        completeAssetIds: [String],
+        finished: Bool
+    ) {
+        self.scanned = scanned
+        self.total = total
+        self.incompleteCount = incompleteCount
+        self.completeAssetIds = completeAssetIds
+        self.finished = finished
+    }
 }
 
 /// Asset IDs present in the archive, derived from sidecars — only after byte verification.
 public enum ArchiveIndex {
-    public static func verifiedAssetIds(in archiveRoot: URL) -> ArchiveIndexReport {
-        let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(
-            at: archiveRoot,
-            includingPropertiesForKeys: nil
-        ) else {
-            return ArchiveIndexReport(completeAssetIds: [], incompleteCount: 0)
-        }
+    /// Low-memory streaming verify: one sidecar at a time, progress deltas, no giant retained ID list.
+    public static func verifyStream(
+        archiveRoot: URL,
+        progressEvery: Int = 15
+    ) -> AsyncStream<ArchiveIndexProgress> {
+        AsyncStream { continuation in
+            Task.detached(priority: .utility) {
+                let sidecars = listSidecarURLs(in: archiveRoot)
+                let total = sidecars.count
+                var scanned = 0
+                var incomplete = 0
+                var batch: [String] = []
+                batch.reserveCapacity(progressEvery)
 
-        var complete = Set<String>()
-        var incomplete = 0
+                func emit(finished: Bool) {
+                    continuation.yield(ArchiveIndexProgress(
+                        scanned: scanned,
+                        total: total,
+                        incompleteCount: incomplete,
+                        completeAssetIds: batch,
+                        finished: finished
+                    ))
+                    batch.removeAll(keepingCapacity: true)
+                }
 
-        for url in files {
-            let name = url.lastPathComponent
-            guard nameContainsSidecar(name) else { continue }
-            guard let data = try? Data(contentsOf: url),
-                  let doc = try? MessageCodec.decode(SidecarDocument.self, from: data),
-                  !doc.assetId.isEmpty else {
-                incomplete += 1
-                continue
+                if total == 0 {
+                    emit(finished: true)
+                    continuation.finish()
+                    return
+                }
+
+                for url in sidecars {
+                    autoreleasepool {
+                        scanned += 1
+                        guard let data = try? Data(contentsOf: url),
+                              let doc = try? MessageCodec.decode(SidecarDocument.self, from: data),
+                              !doc.assetId.isEmpty else {
+                            incomplete += 1
+                            return
+                        }
+                        if isComplete(doc: doc, archiveRoot: archiveRoot) {
+                            batch.append(doc.assetId)
+                        } else {
+                            incomplete += 1
+                        }
+                    }
+                    let shouldEmit = batch.count >= progressEvery
+                        || scanned == total
+                        || scanned % progressEvery == 0
+                    if shouldEmit {
+                        emit(finished: scanned == total)
+                    }
+                }
+                if !batch.isEmpty || scanned < total {
+                    scanned = max(scanned, total)
+                    emit(finished: true)
+                }
+                continuation.finish()
             }
-
-            if isComplete(doc: doc, archiveRoot: archiveRoot) {
-                complete.insert(doc.assetId)
-            } else {
-                incomplete += 1
-            }
         }
-
-        return ArchiveIndexReport(
-            completeAssetIds: complete.sorted(),
-            incompleteCount: incomplete
-        )
     }
 
     /// Every resource in the sidecar must exist on disk with a matching SHA-256.
@@ -56,7 +99,6 @@ public enum ArchiveIndex {
             guard FileManager.default.fileExists(atPath: file.path) else { return false }
             guard let dig = try? Sha256Hasher.hash(fileAt: file) else { return false }
             guard dig == r.sha256.lowercased() else { return false }
-            // Size is advisory — prefer hash as source of truth; still reject obvious truncation.
             if r.size > 0 {
                 let attrs = try? FileManager.default.attributesOfItem(atPath: file.path)
                 if let n = attrs?[.size] as? NSNumber, n.int64Value != r.size {
@@ -65,6 +107,22 @@ public enum ArchiveIndex {
             }
         }
         return true
+    }
+
+    private static func listSidecarURLs(in archiveRoot: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: archiveRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+        ) else { return [] }
+
+        var out: [URL] = []
+        for case let url as URL in enumerator {
+            if nameContainsSidecar(url.lastPathComponent) {
+                out.append(url)
+            }
+        }
+        return out
     }
 
     private static func nameContainsSidecar(_ name: String) -> Bool {

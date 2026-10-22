@@ -142,17 +142,29 @@ final class SessionHandler {
     }
 
     private func sendArchiveIndex() async throws {
-        fputs("archive index: verifying sidecars (sha256)…\n", stderr)
-        let report = ArchiveIndex.verifiedAssetIds(in: archiveRoot)
+        fputs("archive index: streaming verify (sha256)…\n", stderr)
+        var completeTotal = 0
+        var lastIncomplete = 0
+        for await progress in ArchiveIndex.verifyStream(archiveRoot: archiveRoot, progressEvery: 15) {
+            completeTotal += progress.completeAssetIds.count
+            lastIncomplete = progress.incompleteCount
+            try await io.sendJSON(
+                type: .archiveIndexProgress,
+                value: ArchiveIndexProgressPayload(
+                    scanned: progress.scanned,
+                    total: progress.total,
+                    incompleteCount: progress.incompleteCount,
+                    completeAssetIds: progress.completeAssetIds,
+                    finished: progress.finished
+                )
+            )
+        }
         try await io.sendJSON(
             type: .archiveIndexResult,
-            value: ArchiveIndexPayload(
-                assetIds: report.completeAssetIds,
-                incompleteCount: report.incompleteCount
-            )
+            value: ArchiveIndexPayload(assetIds: [], incompleteCount: lastIncomplete)
         )
         fputs(
-            "archive index complete=\(report.completeAssetIds.count) incomplete=\(report.incompleteCount)\n",
+            "archive index done complete≈\(completeTotal) incomplete=\(lastIncomplete)\n",
             stderr
         )
     }

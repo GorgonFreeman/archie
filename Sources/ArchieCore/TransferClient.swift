@@ -83,19 +83,28 @@ public final class TransferClient: @unchecked Sendable {
         }
     }
 
-    /// Completeness-verified asset IDs in the Mac archive (resources exist + sha256 match).
-    public func fetchArchiveIndex() async throws -> ArchiveIndexPayload {
+    /// Stream archive verification progress (complete assetId deltas). Ends after final result frame.
+    public func streamArchiveIndex(
+        onProgress: @escaping @Sendable (ArchiveIndexProgressPayload) async -> Void
+    ) async throws {
         guard let io else { throw TransferError.notConnected }
         try await io.send(type: .archiveIndex)
-        let (type, payload) = try await io.receive()
-        switch type {
-        case .archiveIndexResult:
-            return try MessageCodec.decode(ArchiveIndexPayload.self, from: payload)
-        case .fail:
-            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
-            throw TransferError.rejected(fail.reason)
-        default:
-            throw TransferError.protocolError("expected ARCHIVE_INDEX_RESULT")
+        while true {
+            let (type, payload) = try await io.receive()
+            switch type {
+            case .archiveIndexProgress:
+                let progress = try MessageCodec.decode(ArchiveIndexProgressPayload.self, from: payload)
+                await onProgress(progress)
+                if progress.finished { continue } // wait for result ack
+            case .archiveIndexResult:
+                _ = try MessageCodec.decode(ArchiveIndexPayload.self, from: payload)
+                return
+            case .fail:
+                let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+                throw TransferError.rejected(fail.reason)
+            default:
+                throw TransferError.protocolError("expected ARCHIVE_INDEX_PROGRESS/RESULT")
+            }
         }
     }
 

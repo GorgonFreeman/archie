@@ -2,7 +2,7 @@ import ArchieCore
 import XCTest
 
 final class ArchiveIndexTests: XCTestCase {
-    func testCompleteSidecarIncluded() throws {
+    func testCompleteSidecarIncluded() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("archie-idx-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -42,12 +42,12 @@ final class ArchiveIndexTests: XCTestCase {
             to: root.appendingPathComponent(name + ArchieConstants.sidecarSuffix)
         )
 
-        let report = ArchiveIndex.verifiedAssetIds(in: root)
-        XCTAssertEqual(report.completeAssetIds, ["asset-ok"])
-        XCTAssertEqual(report.incompleteCount, 0)
+        let report = await collectVerify(root)
+        XCTAssertEqual(report.complete, ["asset-ok"])
+        XCTAssertEqual(report.incomplete, 0)
     }
 
-    func testMissingResourceExcluded() throws {
+    func testMissingResourceExcluded() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("archie-idx-miss-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -83,12 +83,12 @@ final class ArchiveIndexTests: XCTestCase {
             to: root.appendingPathComponent("gone.heic" + ArchieConstants.sidecarSuffix)
         )
 
-        let report = ArchiveIndex.verifiedAssetIds(in: root)
-        XCTAssertTrue(report.completeAssetIds.isEmpty)
-        XCTAssertEqual(report.incompleteCount, 1)
+        let report = await collectVerify(root)
+        XCTAssertTrue(report.complete.isEmpty)
+        XCTAssertEqual(report.incomplete, 1)
     }
 
-    func testHashMismatchExcluded() throws {
+    func testHashMismatchExcluded() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("archie-idx-hash-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -126,9 +126,19 @@ final class ArchiveIndexTests: XCTestCase {
             to: root.appendingPathComponent(name + ArchieConstants.sidecarSuffix)
         )
 
-        let report = ArchiveIndex.verifiedAssetIds(in: root)
-        XCTAssertTrue(report.completeAssetIds.isEmpty)
-        XCTAssertEqual(report.incompleteCount, 1)
+        let report = await collectVerify(root)
+        XCTAssertTrue(report.complete.isEmpty)
+        XCTAssertEqual(report.incomplete, 1)
+    }
+
+    private func collectVerify(_ root: URL) async -> (complete: [String], incomplete: Int) {
+        var complete: [String] = []
+        var incomplete = 0
+        for await progress in ArchiveIndex.verifyStream(archiveRoot: root, progressEvery: 1) {
+            complete.append(contentsOf: progress.completeAssetIds)
+            incomplete = progress.incompleteCount
+        }
+        return (complete, incomplete)
     }
 
     private func hash(_ data: Data) throws -> String {
