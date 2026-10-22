@@ -83,4 +83,63 @@ enum DeletionService {
         }
         return results
     }
+
+    /// Delete assets proven by Mac archive presence (sidecar assetId), not this-session receipts.
+    @MainActor
+    static func deleteArchivedAssetIds(
+        _ assetIds: [String],
+        settings: SettingsStore
+    ) async -> [String: DeleteResult] {
+        var results: [String: DeleteResult] = [:]
+        guard !assetIds.isEmpty else { return results }
+
+        guard PhotoAccess.canDelete else {
+            for id in assetIds {
+                results[id] = .retained(.limitedAccess)
+            }
+            return results
+        }
+
+        let policy = ProtectionPolicy(
+            protectFavourites: settings.protectFavourites,
+            protectedAlbumIds: Set(settings.protectedAlbumIds)
+        )
+
+        var toDelete: [PHAsset] = []
+        var deleteIds: [String] = []
+
+        for id in assetIds {
+            let fetch = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+            guard let asset = fetch.firstObject else {
+                results[id] = .deleted
+                continue
+            }
+            let albums = ProtectionPolicy.albumIds(containing: asset)
+            if policy.isProtected(asset, albumIds: albums) {
+                results[id] = .retained(.protected)
+                continue
+            }
+            toDelete.append(asset)
+            deleteIds.append(id)
+        }
+
+        guard !toDelete.isEmpty else { return results }
+
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.deleteAssets(toDelete as NSArray)
+            }
+        } catch {
+            for id in deleteIds {
+                results[id] = .retained(.deleteDeclined)
+            }
+            return results
+        }
+
+        for id in deleteIds {
+            let still = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+            results[id] = still.count == 0 ? .deleted : .retained(.deleteDeclined)
+        }
+        return results
+    }
 }

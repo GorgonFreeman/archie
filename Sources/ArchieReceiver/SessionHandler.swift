@@ -41,6 +41,8 @@ final class SessionHandler {
                     try await endResource(payload)
                 case .assetSettle:
                     try await settleAsset(payload)
+                case .archiveIndex:
+                    try await sendArchiveIndex()
                 case .sessionEnd:
                     fputs("session end\n", stderr)
                     return
@@ -137,6 +139,22 @@ final class SessionHandler {
         }
         self.writer = nil
         currentBegin = nil
+    }
+
+    private func sendArchiveIndex() async throws {
+        fputs("archive index: verifying sidecars (sha256)…\n", stderr)
+        let report = ArchiveIndex.verifiedAssetIds(in: archiveRoot)
+        try await io.sendJSON(
+            type: .archiveIndexResult,
+            value: ArchiveIndexPayload(
+                assetIds: report.completeAssetIds,
+                incompleteCount: report.incompleteCount
+            )
+        )
+        fputs(
+            "archive index complete=\(report.completeAssetIds.count) incomplete=\(report.incompleteCount)\n",
+            stderr
+        )
     }
 
     private func settleAsset(_ payload: Data) async throws {

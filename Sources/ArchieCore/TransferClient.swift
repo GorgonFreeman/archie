@@ -83,6 +83,22 @@ public final class TransferClient: @unchecked Sendable {
         }
     }
 
+    /// Completeness-verified asset IDs in the Mac archive (resources exist + sha256 match).
+    public func fetchArchiveIndex() async throws -> ArchiveIndexPayload {
+        guard let io else { throw TransferError.notConnected }
+        try await io.send(type: .archiveIndex)
+        let (type, payload) = try await io.receive()
+        switch type {
+        case .archiveIndexResult:
+            return try MessageCodec.decode(ArchiveIndexPayload.self, from: payload)
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected ARCHIVE_INDEX_RESULT")
+        }
+    }
+
     public func endSession() async throws {
         try await io?.send(type: .sessionEnd)
         connection?.cancel()

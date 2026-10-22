@@ -12,13 +12,23 @@ final class ImportCoordinator: ObservableObject {
     @Published var isPaused = false
     /// Verified+settled assets waiting for a Photos delete confirmation.
     @Published private(set) var pendingDeleteCount = 0
+    /// Archive leftovers still on the phone — UI presents an alert.
+    @Published var leftoverOffer: LeftoverDeleteOffer?
 
     private let settings: SettingsStore
     private var pendingDeletes: [VerifiedCopy] = []
     private var flushTask: Task<Void, Never>?
+    private var leftoverDecision: CheckedContinuation<Bool, Never>?
 
     init(settings: SettingsStore) {
         self.settings = settings
+    }
+
+    struct LeftoverDeleteOffer: Identifiable {
+        let id = UUID()
+        let assetIds: [String]
+        let incompleteSkipped: Int
+        var count: Int { assetIds.count }
     }
 
     func pause() {
@@ -46,6 +56,38 @@ final class ImportCoordinator: ObservableObject {
         scheduleFlushDeletes()
     }
 
+    func respondToLeftoverOffer(delete: Bool) {
+        leftoverDecision?.resume(returning: delete)
+        leftoverDecision = nil
+        leftoverOffer = nil
+    }
+
+    /// Connect to Mac, list archive assetIds, offer delete for those still on the phone.
+    func auditArchiveLeftovers(pin: String) async {
+        guard !isRunning else { return }
+        guard pin.count >= 4 else {
+            status = "Enter PIN to audit archive"
+            return
+        }
+        settings.lastPin = pin
+        status = "Auditing archive…"
+        let client = TransferClient(pin: pin, deviceName: UIDevice.current.name)
+        do {
+            try await client.connect()
+        } catch {
+            status = "Audit connect failed: \(error.localizedDescription)"
+            return
+        }
+
+        let deleted = await offerDeleteForArchiveLeftovers(client: client)
+        try? await client.endSession()
+        if deleted > 0 {
+            status = "Audit done — deleted \(deleted) leftovers"
+        } else {
+            status = "Audit done — no leftovers on phone"
+        }
+    }
+
     func run(pin: String) async {
         guard !isRunning else { return }
         isRunning = true
@@ -64,6 +106,7 @@ final class ImportCoordinator: ObservableObject {
             return
         }
 
+        settings.lastPin = pin
         status = "Connecting…"
         let client = TransferClient(pin: pin, deviceName: UIDevice.current.name)
         do {
@@ -72,6 +115,9 @@ final class ImportCoordinator: ObservableObject {
             status = "Connect failed: \(error.localizedDescription)"
             return
         }
+
+        status = "Auditing archive leftovers…"
+        _ = await offerDeleteForArchiveLeftovers(client: client)
 
         let opts = PHFetchOptions()
         opts.includeHiddenAssets = true
@@ -233,6 +279,77 @@ final class ImportCoordinator: ObservableObject {
                 copy: copy
             )
         }
+    }
+
+    /// Returns number deleted (0 if none / declined / none found).
+    private func offerDeleteForArchiveLeftovers(client: TransferClient) async -> Int {
+        let index: ArchiveIndexPayload
+        do {
+            status = "Verifying archive (sha256)…"
+            index = try await client.fetchArchiveIndex()
+        } catch {
+            status = "Archive verify failed: \(error.localizedDescription)"
+            return 0
+        }
+
+        let leftovers = Self.archivedAssetsStillOnPhone(
+            archiveIds: index.assetIds,
+            settings: settings
+        )
+        if leftovers.isEmpty {
+            if index.incompleteCount > 0 {
+                status = "No leftovers — \(index.incompleteCount) incomplete archive assets skipped"
+            }
+            return 0
+        }
+
+        let shouldDelete = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            leftoverDecision = cont
+            leftoverOffer = LeftoverDeleteOffer(
+                assetIds: leftovers,
+                incompleteSkipped: index.incompleteCount
+            )
+            status = "Found \(leftovers.count) verified leftovers on phone"
+        }
+        guard shouldDelete else { return 0 }
+
+        status = "Deleting \(leftovers.count) leftovers…"
+        let results = await DeletionService.deleteArchivedAssetIds(leftovers, settings: settings)
+        let deleted = results.values.filter {
+            if case .deleted = $0 { return true }
+            return false
+        }.count
+        summary.deleted += deleted
+        return deleted
+    }
+
+    /// Archive assetIds that are still in the library and not protected.
+    private static func archivedAssetsStillOnPhone(
+        archiveIds: [String],
+        settings: SettingsStore
+    ) -> [String] {
+        guard PhotoAccess.canDelete || PhotoAccess.canImport else { return [] }
+        let policy = ProtectionPolicy(
+            protectFavourites: settings.protectFavourites,
+            protectedAlbumIds: Set(settings.protectedAlbumIds)
+        )
+        var out: [String] = []
+        // PhotoKit accepts large identifier lists; chunk to stay safe.
+        let chunkSize = 500
+        var start = archiveIds.startIndex
+        while start < archiveIds.endIndex {
+            let end = archiveIds.index(start, offsetBy: chunkSize, limitedBy: archiveIds.endIndex)
+                ?? archiveIds.endIndex
+            let chunk = Array(archiveIds[start..<end])
+            start = end
+            let fetch = PHAsset.fetchAssets(withLocalIdentifiers: chunk, options: nil)
+            fetch.enumerateObjects { asset, _, _ in
+                let albums = ProtectionPolicy.albumIds(containing: asset)
+                if policy.isProtected(asset, albumIds: albums) { return }
+                out.append(asset.localIdentifier)
+            }
+        }
+        return out
     }
 
     private func recordTransfer(_ outcome: AssetOutcome) {

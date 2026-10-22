@@ -10,6 +10,10 @@ public enum FrameType: UInt8, Sendable {
     case sessionEnd = 7
     case assetSettle = 8
     case assetSettled = 9
+    /// Phone → Mac: list assetIds present in the archive (from sidecars).
+    case archiveIndex = 10
+    /// Mac → Phone: `ArchiveIndexPayload`.
+    case archiveIndexResult = 11
 }
 
 public struct HelloPayload: Codable, Sendable {
@@ -107,6 +111,18 @@ public struct AssetSettledPayload: Codable, Sendable {
     public init(assetId: String, paths: [PathMapping]) {
         self.assetId = assetId
         self.paths = paths
+    }
+}
+
+public struct ArchiveIndexPayload: Codable, Sendable {
+    /// Only assets whose sidecar resources all exist and match sha256.
+    public var assetIds: [String]
+    /// Sidecars that failed verification (noted; not offered for phone delete).
+    public var incompleteCount: Int
+
+    public init(assetIds: [String], incompleteCount: Int = 0) {
+        self.assetIds = assetIds
+        self.incompleteCount = incompleteCount
     }
 }
 

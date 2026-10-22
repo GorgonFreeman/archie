@@ -11,6 +11,7 @@ struct RootView: View {
         let settings = SettingsStore()
         _settings = StateObject(wrappedValue: settings)
         _importer = StateObject(wrappedValue: ImportCoordinator(settings: settings))
+        _pin = State(initialValue: settings.lastPin)
     }
 
     var body: some View {
@@ -22,6 +23,10 @@ struct RootView: View {
                         .textInputAutocapitalization(.never)
                     Button(importer.isRunning ? "Importing…" : "Start import") {
                         Task { await importer.run(pin: pin) }
+                    }
+                    .disabled(importer.isRunning || pin.count < 4)
+                    Button("Scan archive leftovers") {
+                        Task { await importer.auditArchiveLeftovers(pin: pin) }
                     }
                     .disabled(importer.isRunning || pin.count < 4)
                     if importer.isRunning {
@@ -40,10 +45,10 @@ struct RootView: View {
                     if importer.total > 0 {
                         ProgressView(value: Double(importer.progress), total: Double(importer.total))
                     }
-                    Text("Pause deletes verified so far immediately (doesn’t wait for the current asset). Live Photos: still only.")
+                    Text("On launch / scan / start import: offer to delete phone assets already in the Mac archive. Pause deletes verified immediately.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    }
+                }
 
                 Section("Protection") {
                     Toggle("Protect favourites", isOn: $settings.protectFavourites)
@@ -82,9 +87,30 @@ struct RootView: View {
                 }
             }
             .navigationTitle("Archie")
+            .alert(item: $importer.leftoverOffer) { offer in
+                let incompleteNote = offer.incompleteSkipped > 0
+                    ? " \(offer.incompleteSkipped) incomplete archive assets were skipped (will reimport)."
+                    : ""
+                return Alert(
+                    title: Text("Delete verified leftovers?"),
+                    message: Text(
+                        "\(offer.count) assets are fully verified in the Mac archive (every file present, sha256 match) but still on this phone. Delete them now? Protected favourites/albums are skipped.\(incompleteNote)"
+                    ),
+                    primaryButton: .destructive(Text("Delete \(offer.count)")) {
+                        importer.respondToLeftoverOffer(delete: true)
+                    },
+                    secondaryButton: .cancel(Text("Keep")) {
+                        importer.respondToLeftoverOffer(delete: false)
+                    }
+                )
+            }
             .task {
                 _ = await PhotoAccess.request()
                 loadAlbums()
+                // App start: if we have a saved PIN and receiver is up, audit leftovers.
+                if pin.count >= 4 {
+                    await importer.auditArchiveLeftovers(pin: pin)
+                }
             }
         }
     }

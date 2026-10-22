@@ -10,11 +10,16 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(protectedAlbumIds, forKey: Keys.protectedAlbums) }
     }
 
+    @Published var lastPin: String {
+        didSet { defaults.set(lastPin, forKey: Keys.lastPin) }
+    }
+
     private let defaults: UserDefaults
 
     private enum Keys {
         static let protectFavourites = "protectFavourites"
         static let protectedAlbums = "protectedAlbumIds"
+        static let lastPin = "lastPin"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -25,6 +30,7 @@ final class SettingsStore: ObservableObject {
             protectFavourites = defaults.bool(forKey: Keys.protectFavourites)
         }
         protectedAlbumIds = defaults.stringArray(forKey: Keys.protectedAlbums) ?? []
+        lastPin = defaults.string(forKey: Keys.lastPin) ?? ""
     }
 
     func toggleAlbum(_ id: String) {

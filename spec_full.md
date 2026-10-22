@@ -84,6 +84,8 @@ An asset is **eligible** only if all of the following hold:
 
 Eligible assets are deleted with `PHAssetChangeRequest.deleteAssets` when the user **pauses** or the import **finishes**. On pause, the Photos confirmation runs **immediately** for assets already verified (does not wait for the in-flight asset). iOS shows one confirmation prompt per flush; that prompt cannot be suppressed. Deleted items go to Recently Deleted for 30 days.
 
+**Leftover audit** (app launch / scan / start of import): the Mac re-reads every sidecar and only returns asset IDs whose listed resources **all exist** and **match SHA-256** (and size when declared). Incomplete archive assets are counted and skipped — not offered for phone delete.
+
 Deletion is gated by a `VerifiedCopy` proof type that can only be built when every media resource and the sidecar have a Mac RECEIPT whose hash and size match what the phone sent. No proof → no delete. Protection and full-access checks run fresh immediately before each delete. A disconnect, crash, failed transfer, or declined Photos prompt leaves that asset on the phone.
 
 The UI reports running counts of imported, verified, deleted, retained (and why: protected, failed, unreadable, sidecar failed, limited access, delete declined).
