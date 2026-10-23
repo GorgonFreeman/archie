@@ -66,6 +66,7 @@ enum DeletionService {
 
         guard !toDelete.isEmpty else { return results }
 
+        // Present the system delete confirmation (requires full Photos access + at least one asset).
         do {
             try await PHPhotoLibrary.shared().performChanges {
                 PHAssetChangeRequest.deleteAssets(toDelete as NSArray)

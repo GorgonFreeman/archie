@@ -92,7 +92,11 @@ final class ImportCoordinator: ObservableObject {
 
     /// Delete whatever is verified and ready (import queue and/or leftover scan).
     func deleteVerified() {
-        guard verifiedReadyCount > 0, !isDeletingVerified else { return }
+        guard verifiedReadyCount > 0 else { return }
+        if isDeletingVerified {
+            status = "Delete already in progress…"
+            return
+        }
         Task { await flushAllVerifiedReady() }
     }
 
@@ -370,6 +374,8 @@ final class ImportCoordinator: ObservableObject {
 
     private func flushPendingDeletes() async {
         let batch = pendingDeletes
+        pendingDeletes = []
+        publishVerifiedReadyCount()
         guard !batch.isEmpty else { return }
         await applyDeleteResults(batch)
     }
@@ -379,20 +385,39 @@ final class ImportCoordinator: ObservableObject {
         isDeletingVerified = true
         defer { isDeletingVerified = false }
 
+        let importCount = pendingDeletes.count
+        let leftoverCount = leftoverReadyIds.count
+        let total = importCount + leftoverCount
+        guard total > 0 else {
+            status = "Nothing verified to delete"
+            return
+        }
+
+        status = "Deleting \(total) verified…"
         if !pendingDeletes.isEmpty {
-            status = isPaused
-                ? "Paused — confirming delete of \(pendingDeletes.count)…"
-                : "Deleting \(pendingDeletes.count) verified…"
             await flushPendingDeletes()
         }
         if !leftoverReadyIds.isEmpty {
             _ = await flushLeftoverReadyDeletes()
         }
+
+        let remaining = pendingDeletes.count + leftoverReadyIds.count
+        if remaining == 0 {
+            status = "Deleted verified assets"
+        } else if remaining == total {
+            // Nothing removed — usually all protected / limited Photos access / declined.
+            if !PhotoAccess.canDelete {
+                status = "Full Photos access required to delete"
+            } else {
+                status = "Nothing deleted — \(remaining) retained (protected or declined)"
+            }
+        } else {
+            status = "Deleted some — \(remaining) still ready"
+        }
     }
 
     private func applyDeleteResults(_ batch: [VerifiedCopy]) async {
         let results = await DeletionService.deleteVerifiedBatch(batch, settings: settings)
-        let batchIds = Set(batch.map(\.assetId))
         var keep: [VerifiedCopy] = []
 
         for copy in batch {
@@ -414,7 +439,14 @@ final class ImportCoordinator: ObservableObject {
             case .retained(let r):
                 deleted = false
                 reason = r
-                keep.append(copy)
+                // Protected / gone-from-library should leave the delete queue.
+                // Declined / limited / failed stay so Delete Verified can retry.
+                switch r {
+                case .protected, .sidecarFailed:
+                    break
+                case .deleteDeclined, .limitedAccess, .failed, .unreadable, .settleFailed:
+                    keep.append(copy)
+                }
                 if let idx = summary.outcomes.firstIndex(where: { $0.id == copy.assetId }) {
                     let prev = summary.outcomes[idx]
                     // Count retained only on first transition so retries do not inflate the total.
@@ -436,9 +468,8 @@ final class ImportCoordinator: ObservableObject {
             }
         }
 
-        // Keep non-batch items + anything not successfully deleted (user can tap Delete Verified again).
-        let others = pendingDeletes.filter { !batchIds.contains($0.assetId) }
-        pendingDeletes = others + keep
+        // Anything verified while the Photos prompt was up stays queued.
+        pendingDeletes.append(contentsOf: keep)
         publishVerifiedReadyCount()
     }
 
@@ -487,8 +518,18 @@ final class ImportCoordinator: ObservableObject {
                 )
             }
             if Self.isProtected(asset, policy: protection, protectedByAlbum: protectedByAlbum) {
-                // Best-effort: skip on next import while still protected on phone.
+                // Keep on phone — do not queue for Delete Verified (would never show a Photos prompt).
                 try? await client.markProtectedSeen(assetId: copy.assetId)
+                return .ok(
+                    AssetOutcome(
+                        id: copy.assetId,
+                        bytes: copy.bytes,
+                        verified: true,
+                        deleted: false,
+                        retainReason: .protected
+                    ),
+                    copy: nil
+                )
             }
             // Placeholder until batch delete runs — counts as verified, not yet deleted/retained.
             return .ok(
@@ -562,11 +603,15 @@ final class ImportCoordinator: ObservableObject {
         var remaining: [String] = []
         var deleted = 0
         for id in ids {
-            if case .deleted = results[id] {
+            switch results[id] {
+            case .deleted:
                 deleted += 1
-            } else {
-                // Declined / protected / failed — keep ready so Delete Verified stays usable.
+            case .retained(.deleteDeclined), .retained(.limitedAccess), .retained(.failed), .none:
+                // Retryable — keep in the Delete Verified queue.
                 remaining.append(id)
+            case .retained:
+                // Protected / already gone from deletable set — drop from queue.
+                break
             }
         }
         leftoverReadyIds = remaining
