@@ -247,12 +247,33 @@ public enum TransferError: Error, LocalizedError {
     }
 }
 
+/// One receive waiter — `finish` is idempotent so timeout vs frame cannot double-resume.
+private final class FrameWaiter: @unchecked Sendable {
+    private var cont: CheckedContinuation<(FrameType, Data), Error>?
+    private var finished = false
+
+    init(_ cont: CheckedContinuation<(FrameType, Data), Error>) {
+        self.cont = cont
+    }
+
+    func finish(_ result: Result<(FrameType, Data), Error>) {
+        guard !finished else { return }
+        finished = true
+        let c = cont
+        cont = nil
+        switch result {
+        case .success(let value): c?.resume(returning: value)
+        case .failure(let error): c?.resume(throwing: error)
+        }
+    }
+}
+
 final class ClientIO: @unchecked Sendable {
     private let connection: NWConnection
     private let parser = FrameParser()
     private let queue: DispatchQueue
     private var pending: [(FrameType, Data)] = []
-    private var waiters: [CheckedContinuation<(FrameType, Data), Error>] = []
+    private var waiters: [FrameWaiter] = []
     private var closed: Error?
 
     var isClosed: Bool { queue.sync { closed != nil } }
@@ -290,30 +311,28 @@ final class ClientIO: @unchecked Sendable {
 
     /// `timeoutNanoseconds` nil = wait until frame or connection failure.
     func receive(timeoutNanoseconds: UInt64?) async throws -> (FrameType, Data) {
-        if let timeoutNanoseconds {
-            return try await withThrowingTaskGroup(of: (FrameType, Data).self) { group in
-                group.addTask { try await self.receiveOnce() }
-                group.addTask {
-                    try await Task.sleep(nanoseconds: timeoutNanoseconds)
-                    throw TransferError.connectionLost("timed out waiting for reply")
-                }
-                let result = try await group.next()!
-                group.cancelAll()
-                return result
-            }
-        }
-        return try await receiveOnce()
-    }
-
-    private func receiveOnce() async throws -> (FrameType, Data) {
-        try await withCheckedThrowingContinuation { cont in
-            queue.async {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<(FrameType, Data), Error>) in
+            self.queue.async {
                 if let closed = self.closed {
                     cont.resume(throwing: closed)
-                } else if !self.pending.isEmpty {
+                    return
+                }
+                if !self.pending.isEmpty {
                     cont.resume(returning: self.pending.removeFirst())
-                } else {
-                    self.waiters.append(cont)
+                    return
+                }
+                let waiter = FrameWaiter(cont)
+                self.waiters.append(waiter)
+                if let timeoutNanoseconds {
+                    self.queue.asyncAfter(
+                        deadline: .now() + .nanoseconds(Int(timeoutNanoseconds))
+                    ) {
+                        // Idempotent: no-op if a frame already finished this waiter.
+                        self.waiters.removeAll { $0 === waiter }
+                        waiter.finish(.failure(
+                            TransferError.connectionLost("timed out waiting for reply")
+                        ))
+                    }
                 }
             }
         }
@@ -332,7 +351,8 @@ final class ClientIO: @unchecked Sendable {
                     self.parser.append(content)
                     while let frame = self.parser.nextFrame() {
                         if !self.waiters.isEmpty {
-                            self.waiters.removeFirst().resume(returning: frame)
+                            let waiter = self.waiters.removeFirst()
+                            waiter.finish(.success(frame))
                         } else {
                             self.pending.append(frame)
                         }
@@ -352,6 +372,6 @@ final class ClientIO: @unchecked Sendable {
         closed = error
         let w = waiters
         waiters.removeAll()
-        w.forEach { $0.resume(throwing: error) }
+        w.forEach { $0.finish(.failure(error)) }
     }
 }

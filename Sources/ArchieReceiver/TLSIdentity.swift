@@ -2,16 +2,54 @@ import Foundation
 import Security
 
 enum TLSIdentity {
+    private static let commonName = "Archie Receiver"
+    private static let p12Password = "archie"
+
     static func loadOrCreate(in directory: URL) throws -> SecIdentity {
+        // Reuse a keychain identity if present — re-importing the .p12 every launch
+        // creates a new key and macOS re-prompts for access.
+        if let existing = findIdentity(commonName: commonName) {
+            return existing
+        }
+
         let p12URL = directory.appendingPathComponent("archie-tls.p12")
-        let password = "archie"
-        if FileManager.default.fileExists(atPath: p12URL.path),
-           let identity = try? loadP12(at: p12URL, password: password) {
+        if !FileManager.default.fileExists(atPath: p12URL.path) {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try generateP12(at: p12URL, password: p12Password)
+        }
+        return try loadP12(at: p12URL, password: p12Password)
+    }
+
+    private static func findIdentity(commonName: String) -> SecIdentity? {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassIdentity,
+            kSecReturnRef: true,
+            kSecMatchLimit: kSecMatchLimitAll,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let result
+        else { return nil }
+
+        let identities: [SecIdentity]
+        if let many = result as? [SecIdentity] {
+            identities = many
+        } else if CFGetTypeID(result) == SecIdentityGetTypeID() {
+            identities = [result as! SecIdentity]
+        } else {
+            return nil
+        }
+
+        for identity in identities {
+            var cert: SecCertificate?
+            guard SecIdentityCopyCertificate(identity, &cert) == errSecSuccess,
+                  let cert,
+                  let summary = SecCertificateCopySubjectSummary(cert) as String?,
+                  summary == commonName || summary.contains(commonName)
+            else { continue }
             return identity
         }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try generateP12(at: p12URL, password: password)
-        return try loadP12(at: p12URL, password: password)
+        return nil
     }
 
     private static func generateP12(at p12URL: URL, password: String) throws {
@@ -23,7 +61,7 @@ enum TLSIdentity {
             "-keyout", keyURL.path,
             "-out", certURL.path,
             "-days", "825", "-nodes",
-            "-subj", "/CN=Archie Receiver",
+            "-subj", "/CN=\(commonName)",
         ])
         try run("/usr/bin/openssl", [
             "pkcs12", "-export",
@@ -44,10 +82,11 @@ enum TLSIdentity {
         guard status == errSecSuccess,
               let array = items as? [[String: Any]],
               let first = array.first,
-              let identity = first[kSecImportItemIdentity as String] else {
+              let identityObj = first[kSecImportItemIdentity as String]
+        else {
             throw ReceiverError.tlsIdentity
         }
-        return identity as! SecIdentity
+        return identityObj as! SecIdentity
     }
 
     private static func run(_ launchPath: String, _ args: [String]) throws {
