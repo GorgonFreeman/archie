@@ -27,15 +27,23 @@ public final class FrameParser: @unchecked Sendable {
 
     public func nextFrame() -> (FrameType, Data)? {
         guard buffer.count >= 5 else { return nil }
-        let length = Int(buffer.prefix(4).withUnsafeBytes { $0.load(as: UInt32.self).bigEndian })
+        // Byte-wise big-endian read — `load(as: UInt32.self)` crashes on unaligned ARM pointers.
+        let length = Int(readUInt32BigEndian(at: 0))
         guard length >= 1, buffer.count >= 4 + length else { return nil }
         let typeByte = buffer[4]
         guard let type = FrameType(rawValue: typeByte) else {
             buffer.removeSubrange(0..<(4 + length))
             return nil
         }
-        let payload = buffer.subdata(in: 5..<(4 + length))
+        let payload = Data(buffer[5..<(4 + length)])
         buffer.removeSubrange(0..<(4 + length))
         return (type, payload)
+    }
+
+    private func readUInt32BigEndian(at offset: Int) -> UInt32 {
+        UInt32(buffer[offset]) << 24
+            | UInt32(buffer[offset + 1]) << 16
+            | UInt32(buffer[offset + 2]) << 8
+            | UInt32(buffer[offset + 3])
     }
 }

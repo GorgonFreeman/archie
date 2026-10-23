@@ -149,7 +149,8 @@ final class SessionHandler {
 
     private func sendProtectedSeen() async throws {
         do {
-            let ids = try ProtectedSeenLog.loadMergingSidecars(archiveRoot: archiveRoot)
+            // Log only — do not rescan sidecars on the hot path (slow / memory-heavy).
+            let ids = ProtectedSeenLog.load(archiveRoot: archiveRoot)
             try await io.sendJSON(
                 type: .protectedSeenResult,
                 value: ProtectedSeenPayload(assetIds: Array(ids).sorted())

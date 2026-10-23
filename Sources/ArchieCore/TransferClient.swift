@@ -19,7 +19,10 @@ public final class TransferClient: @unchecked Sendable {
 
     /// False after the NWConnection fails/cancels or IO is closed.
     public var isAlive: Bool {
-        queue.sync { alive && !(io?.isClosed ?? true) }
+        queue.sync {
+            guard alive, let io else { return false }
+            return !io.isClosedUnlocked
+        }
     }
 
     public func connect() async throws {
@@ -277,6 +280,9 @@ final class ClientIO: @unchecked Sendable {
     private var closed: Error?
 
     var isClosed: Bool { queue.sync { closed != nil } }
+
+    /// Call only while already on `queue` (avoids nested `queue.sync` deadlock).
+    var isClosedUnlocked: Bool { closed != nil }
 
     init(connection: NWConnection, queue: DispatchQueue) {
         self.connection = connection
