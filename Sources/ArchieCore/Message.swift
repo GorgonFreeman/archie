@@ -26,6 +26,10 @@ public enum FrameType: UInt8, Sendable {
     case ping = 16
     /// Mac → Phone: liveness ack (empty payload).
     case pong = 17
+    /// Phone → Mac: request settled assetIds present in the archive (fast, no SHA verify).
+    case settledIdsFetch = 18
+    /// Mac → Phone: `SettledIdsPayload`.
+    case settledIdsResult = 19
 }
 
 public struct HelloPayload: Codable, Sendable {
@@ -173,6 +177,14 @@ public struct ProtectedSeenMarkPayload: Codable, Sendable {
 
     public init(assetId: String) {
         self.assetId = assetId
+    }
+}
+
+public struct SettledIdsPayload: Codable, Sendable {
+    public var assetIds: [String]
+
+    public init(assetIds: [String]) {
+        self.assetIds = assetIds
     }
 }
 

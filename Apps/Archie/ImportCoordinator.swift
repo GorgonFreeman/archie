@@ -1,5 +1,6 @@
 import Foundation
 import Photos
+import SwiftUI
 import UIKit
 
 @MainActor
@@ -10,6 +11,8 @@ final class ImportCoordinator: ObservableObject {
     @Published var summary = ImportSummary()
     @Published var isRunning = false
     @Published var isPaused = false
+    /// Waiting for Resume to Bonjour+HELLO again after a dead link.
+    @Published private(set) var needsReconnect = false
     /// True while Mac is streaming archive SHA-256 verification (Scan leftovers).
     @Published private(set) var isScanning = false
     @Published private(set) var scanScanned = 0
@@ -32,7 +35,12 @@ final class ImportCoordinator: ObservableObject {
     private var isDeletingVerified = false
     /// Live import session client (for resume ping / abort).
     private var activeClient: TransferClient?
-    private var stopBecauseConnectionLost = false
+    /// PIN for the current import run (reconnect uses the same PIN).
+    private var sessionPin = ""
+    /// Settled assetIds on the Mac — skip transfer; refreshed after reconnect.
+    private var settledOnMac: Set<String> = []
+    /// Pause was triggered by leaving the foreground (auto-resume on active).
+    private var pausedForBackground = false
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -53,11 +61,34 @@ final class ImportCoordinator: ObservableObject {
         isPaused = true
         // Offer delete for everything already verified (Photos confirmation).
         // Queue is only drained for assets that actually delete — declined stay ready.
-        if pendingDeletes.isEmpty {
+        if needsReconnect {
+            status = "Stopped — connection lost. Tap Resume to reconnect (\(progress)/\(total))"
+        } else if pendingDeletes.isEmpty {
             status = "Paused — finishing current asset, then holding"
         } else {
             status = "Paused — confirming delete of \(pendingDeletes.count)…"
             scheduleFlushDeletes()
+        }
+    }
+
+    /// Auto-pause when backgrounded; Resume (or auto on active) reconnects if needed.
+    /// Uses `.background` only — `.inactive` (Control Center) would flap mid-transfer.
+    func handleScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            guard isRunning, !isPaused else { return }
+            pausedForBackground = true
+            isPaused = true
+            status = "Paused — app left foreground (tap Resume to continue)"
+            if !pendingDeletes.isEmpty {
+                scheduleFlushDeletes()
+            }
+        case .active:
+            guard isRunning, isPaused, pausedForBackground else { return }
+            pausedForBackground = false
+            resume()
+        default:
+            break
         }
     }
 
@@ -67,27 +98,57 @@ final class ImportCoordinator: ObservableObject {
             continuePastRecentMonth()
             return
         }
-        status = "Checking connection…"
+        status = needsReconnect ? "Reconnecting…" : "Checking connection…"
         Task { await resumeAfterConnectionCheck() }
     }
 
     private func resumeAfterConnectionCheck() async {
         guard isRunning, isPaused else { return }
-        guard let client = activeClient else {
-            stopBecauseConnectionLost = true
-            isPaused = false
-            status = "Connection lost — stop and restart import"
-            return
+        if let client = activeClient, client.isAlive {
+            do {
+                try await client.ping()
+                needsReconnect = false
+                isPaused = false
+                status = "Resuming…"
+                return
+            } catch {
+                // Fall through to Bonjour reconnect.
+            }
         }
+        status = "Reconnecting…"
         do {
-            try await client.ping()
+            let client: TransferClient
+            if let existing = activeClient {
+                try await existing.reconnect()
+                client = existing
+            } else {
+                guard !sessionPin.isEmpty else {
+                    needsReconnect = true
+                    status = "Reconnect failed — missing PIN"
+                    return
+                }
+                client = TransferClient(pin: sessionPin, deviceName: UIDevice.current.name)
+                try await client.connect()
+                activeClient = client
+            }
+            if let refreshed = try? await client.fetchSettledIds() {
+                settledOnMac = refreshed
+            }
+            needsReconnect = false
             isPaused = false
             status = "Resuming…"
         } catch {
-            stopBecauseConnectionLost = true
-            isPaused = false
-            status = "Connection lost — stop and restart import"
+            needsReconnect = true
+            isPaused = true
+            status = "Reconnect failed — tap Resume when Mac is ready"
         }
+    }
+
+    private func enterConnectionLostWait() {
+        needsReconnect = true
+        isPaused = true
+        pausedForBackground = false
+        status = "Stopped — connection lost. Tap Resume to reconnect (\(progress)/\(total))"
     }
 
     /// Delete whatever is verified and ready (import queue and/or leftover scan).
@@ -162,12 +223,18 @@ final class ImportCoordinator: ObservableObject {
         guard !isRunning, !isScanning else { return }
         isRunning = true
         isPaused = false
-        stopBecauseConnectionLost = false
+        needsReconnect = false
+        pausedForBackground = false
+        sessionPin = pin
+        settledOnMac = []
         defer {
             isRunning = false
             isPaused = false
+            needsReconnect = false
+            pausedForBackground = false
             activeClient = nil
-            stopBecauseConnectionLost = false
+            sessionPin = ""
+            settledOnMac = []
             UIApplication.shared.isIdleTimerDisabled = false
         }
         UIApplication.shared.isIdleTimerDisabled = true
@@ -190,6 +257,15 @@ final class ImportCoordinator: ObservableObject {
             return
         }
         activeClient = client
+
+        status = "Loading settled archive IDs…"
+        do {
+            settledOnMac = try await client.fetchSettledIds()
+        } catch {
+            status = "Settled IDs failed: \(error.localizedDescription)"
+            try? await client.endSession()
+            return
+        }
 
         status = "Loading protected-seen log…"
         let protectedSeen: Set<String>
@@ -215,7 +291,13 @@ final class ImportCoordinator: ObservableObject {
 
         var assets: [PHAsset] = []
         var skippedProtectedSeen = 0
+        var skippedSettled = 0
+        let settledSnapshot = settledOnMac
         fetch.enumerateObjects { asset, _, _ in
+            if settledSnapshot.contains(asset.localIdentifier) {
+                skippedSettled += 1
+                return
+            }
             let protectedNow = Self.isProtected(
                 asset,
                 policy: protection,
@@ -229,8 +311,15 @@ final class ImportCoordinator: ObservableObject {
         }
         total = assets.count
         progress = 0
+        var skipNotes: [String] = []
+        if skippedSettled > 0 {
+            skipNotes.append("\(skippedSettled) already on Mac")
+        }
         if skippedProtectedSeen > 0 {
-            status = "Skipping \(skippedProtectedSeen) already-imported protected assets…"
+            skipNotes.append("\(skippedProtectedSeen) protected-seen")
+        }
+        if !skipNotes.isEmpty {
+            status = "Skipping \(skipNotes.joined(separator: ", "))…"
         }
 
         pendingDeletes.removeAll(keepingCapacity: true)
@@ -241,34 +330,45 @@ final class ImportCoordinator: ObservableObject {
         let recentMonthStart = Self.startOfNewestMonth(in: assets)
         var offeredRecentMonthGate = false
 
-        for asset in assets {
-            if stopBecauseConnectionLost || !client.isAlive {
-                status = "Stopped — connection lost (restart import when Mac is ready)"
-                break
+        var index = 0
+        while index < assets.count {
+            // Hold here while paused or until Resume reconnects a dead link.
+            while isPaused || activeClient == nil || !(activeClient?.isAlive ?? false) {
+                if activeClient == nil || !(activeClient?.isAlive ?? false) {
+                    enterConnectionLostWait()
+                }
+                while isPaused {
+                    if needsReconnect {
+                        status = "Stopped — connection lost. Tap Resume to reconnect (\(progress)/\(total))"
+                    } else {
+                        status = pendingDeletes.isEmpty
+                            ? "Paused at \(progress)/\(total)"
+                            : "Paused — \(pendingDeletes.count) verified waiting to delete"
+                    }
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
             }
+
+            guard let client = activeClient, client.isAlive else { continue }
+
+            let asset = assets[index]
+            if settledOnMac.contains(asset.localIdentifier) {
+                index += 1
+                progress = index
+                continue
+            }
+
             if !offeredRecentMonthGate,
                let recentMonthStart,
                let created = asset.creationDate,
                created >= recentMonthStart {
                 offeredRecentMonthGate = true
                 await pauseForRecentMonth(monthStart: recentMonthStart)
+                // User may have backgrounded / lost link during the gate.
+                continue
             }
-            while isPaused {
-                if stopBecauseConnectionLost {
-                    break
-                }
-                // Flush is scheduled once on pause / when the in-flight asset settles.
-                // Do not re-flush every tick — that races the Photos prompt and drops the queue.
-                status = pendingDeletes.isEmpty
-                    ? "Paused at \(progress)/\(total)"
-                    : "Paused — \(pendingDeletes.count) verified waiting to delete"
-                try? await Task.sleep(nanoseconds: 200_000_000)
-            }
-            if stopBecauseConnectionLost {
-                status = "Stopped — connection lost (restart import when Mac is ready)"
-                break
-            }
-            progress += 1
+
+            progress = index + 1
             status = "Asset \(progress)/\(total)"
             let settled = await transferAndSettle(
                 asset,
@@ -277,11 +377,11 @@ final class ImportCoordinator: ObservableObject {
                 protectedByAlbum: protectedByAlbum
             )
             if case .connectionLost = settled {
-                stopBecauseConnectionLost = true
-                status = "Stopped — connection lost (restart import when Mac is ready)"
-                break
+                enterConnectionLostWait()
+                continue // retry same asset after reconnect
             }
             if case .ok(let outcome, let copy) = settled {
+                settledOnMac.insert(asset.localIdentifier)
                 recordTransfer(outcome)
                 if let copy {
                     pendingDeletes.append(copy)
@@ -293,6 +393,7 @@ final class ImportCoordinator: ObservableObject {
                     }
                 }
             }
+            index += 1
         }
 
         // Wait for any in-flight pause flush, then drain the rest at end.
@@ -304,7 +405,7 @@ final class ImportCoordinator: ObservableObject {
             await flushPendingDeletes()
         }
 
-        try? await client.endSession()
+        try? await activeClient?.endSession()
         if pendingDeletes.count + leftoverReadyIds.count > 0 {
             let n = pendingDeletes.count + leftoverReadyIds.count
             status = "Finished — \(n) verified still ready to delete"

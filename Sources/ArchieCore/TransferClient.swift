@@ -47,6 +47,31 @@ public final class TransferClient: @unchecked Sendable {
         }
     }
 
+    /// Tear down Bonjour/TLS so `connect()` / `reconnect()` can start clean.
+    public func disconnect() {
+        queue.sync {
+            browser?.cancel()
+            browser = nil
+            connection?.cancel()
+            connection = nil
+            if let io {
+                io.noteClosed(TransferError.connectionLost("disconnected"))
+            }
+            self.io = nil
+            alive = false
+            if let cont = readyCont {
+                readyCont = nil
+                cont.resume(throwing: TransferError.connectionLost("disconnected"))
+            }
+        }
+    }
+
+    /// Drop the dead link and Bonjour+HELLO again (same PIN).
+    public func reconnect() async throws {
+        disconnect()
+        try await connect()
+    }
+
     /// Cheap liveness check (used before resume). Throws `connectionLost` if the link is dead.
     public func ping() async throws {
         guard isAlive, let io else { throw TransferError.connectionLost("not connected") }
@@ -54,6 +79,23 @@ public final class TransferClient: @unchecked Sendable {
         let (type, _) = try await io.receive(timeoutNanoseconds: ArchieConstants.pingTimeoutNanoseconds)
         guard type == .pong else {
             throw TransferError.protocolError("expected PONG")
+        }
+    }
+
+    /// Settled archive assetIds (resources present on disk). Fast — no SHA verify.
+    public func fetchSettledIds() async throws -> Set<String> {
+        guard let io else { throw TransferError.notConnected }
+        try await io.send(type: .settledIdsFetch)
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
+        switch type {
+        case .settledIdsResult:
+            let body = try MessageCodec.decode(SettledIdsPayload.self, from: payload)
+            return Set(body.assetIds)
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected SETTLED_IDS_RESULT")
         }
     }
 
@@ -170,8 +212,7 @@ public final class TransferClient: @unchecked Sendable {
 
     public func endSession() async throws {
         try await io?.send(type: .sessionEnd)
-        connection?.cancel()
-        queue.sync { alive = false }
+        disconnect()
     }
 
     private func startBrowser() {

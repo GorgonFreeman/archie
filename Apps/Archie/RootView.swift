@@ -2,6 +2,7 @@ import Photos
 import SwiftUI
 
 struct RootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var settings: SettingsStore
     @StateObject private var importer: ImportCoordinator
     @State private var pin = ""
@@ -24,6 +25,10 @@ struct RootView: View {
     private var deleteLabel: String {
         let n = importer.verifiedReadyCount
         return n > 0 ? "Delete Verified (\(n))" : "Delete Verified"
+    }
+    private var pauseResumeLabel: String {
+        if importer.needsReconnect { return "Resume (reconnect)" }
+        return importer.isPaused ? "Resume" : "Pause"
     }
 
     var body: some View {
@@ -52,7 +57,7 @@ struct RootView: View {
                     .disabled(importer.verifiedReadyCount == 0)
 
                     if importer.isRunning {
-                        Button(importer.isPaused ? "Resume" : "Pause") {
+                        Button(pauseResumeLabel) {
                             if importer.isPaused { importer.resume() }
                             else { importer.pause() }
                         }
@@ -77,7 +82,7 @@ struct RootView: View {
                         )
                     }
 
-                    Text("Import copies to the Mac. Scan leftovers verifies the archive and queues matching phone assets for Delete Verified. Import pauses before the newest month so you can favourite first.")
+                    Text("Import copies to the Mac. Keep the app foregrounded — backgrounding pauses and Resume reconnects if the link dropped. Scan leftovers verifies the archive and queues matching phone assets for Delete Verified.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -133,6 +138,9 @@ struct RootView: View {
             .task {
                 _ = await PhotoAccess.request()
                 loadAlbums()
+            }
+            .onChange(of: scenePhase) { phase in
+                importer.handleScenePhase(phase)
             }
         }
     }

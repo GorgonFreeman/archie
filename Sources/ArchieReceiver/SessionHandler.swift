@@ -47,6 +47,8 @@ final class SessionHandler {
                     try await sendProtectedSeen()
                 case .protectedSeenMark:
                     try await markProtectedSeen(payload)
+                case .settledIdsFetch:
+                    try await sendSettledIds()
                 case .ping:
                     try await io.send(type: .pong)
                 case .sessionEnd:
@@ -160,6 +162,22 @@ final class SessionHandler {
             try await io.sendJSON(
                 type: .fail,
                 value: FailPayload(reason: "protected log: \(error.localizedDescription)")
+            )
+        }
+    }
+
+    private func sendSettledIds() async throws {
+        do {
+            let ids = ArchiveIndex.listPresentAssetIds(archiveRoot: archiveRoot)
+            try await io.sendJSON(
+                type: .settledIdsResult,
+                value: SettledIdsPayload(assetIds: Array(ids).sorted())
+            )
+            fputs("settled ids: \(ids.count)\n", stderr)
+        } catch {
+            try await io.sendJSON(
+                type: .fail,
+                value: FailPayload(reason: "settled ids: \(error.localizedDescription)")
             )
         }
     }

@@ -129,6 +129,49 @@ final class ArchiveIndexTests: XCTestCase {
         let report = await collectVerify(root)
         XCTAssertTrue(report.complete.isEmpty)
         XCTAssertEqual(report.incomplete, 1)
+
+        // Presence list skips SHA — size+path match is enough for import resume.
+        let present = ArchiveIndex.listPresentAssetIds(archiveRoot: root)
+        XCTAssertEqual(present, ["asset-badhash"])
+    }
+
+    func testListPresentSkipsMissingResource() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("archie-idx-present-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let doc = SidecarDocument(
+            assetId: "asset-gone",
+            deviceModel: "Test",
+            iosVersion: "18",
+            creationDate: Date(),
+            modificationDate: nil,
+            location: nil,
+            isFavorite: false,
+            isHidden: false,
+            albums: [],
+            mediaType: "image",
+            subtypes: [],
+            burstIdentifier: nil,
+            pixelWidth: 1,
+            pixelHeight: 1,
+            duration: 0,
+            resources: [
+                SidecarResource(
+                    type: "photo",
+                    originalFilename: "gone.heic",
+                    size: 3,
+                    sha256: String(repeating: "a", count: 64),
+                    relativePath: "gone.heic"
+                ),
+            ]
+        )
+        try MessageCodec.encode(doc).write(
+            to: root.appendingPathComponent("gone.heic" + ArchieConstants.sidecarSuffix)
+        )
+
+        XCTAssertTrue(ArchiveIndex.listPresentAssetIds(archiveRoot: root).isEmpty)
     }
 
     private func collectVerify(_ root: URL) async -> (complete: [String], incomplete: Int) {

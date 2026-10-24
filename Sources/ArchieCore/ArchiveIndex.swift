@@ -25,6 +25,43 @@ public struct ArchiveIndexProgress: Sendable {
 
 /// Asset IDs present in the archive, derived from sidecars — only after byte verification.
 public enum ArchiveIndex {
+    /// Fast settle skip list: sidecar assetIds whose resources exist on disk (size check, no SHA).
+    /// Used so Import can continue after interrupt without re-transferring settled work.
+    public static func listPresentAssetIds(archiveRoot: URL) -> Set<String> {
+        var out = Set<String>()
+        for url in listSidecarURLs(in: archiveRoot) {
+            autoreleasepool {
+                guard let data = try? Data(contentsOf: url),
+                      let doc = try? MessageCodec.decode(SidecarDocument.self, from: data),
+                      !doc.assetId.isEmpty,
+                      resourcesPresent(doc: doc, archiveRoot: archiveRoot) else {
+                    return
+                }
+                out.insert(doc.assetId)
+            }
+        }
+        return out
+    }
+
+    /// Resources exist (and sizes match when declared). Does not hash — use `isComplete` for verify.
+    public static func resourcesPresent(doc: SidecarDocument, archiveRoot: URL) -> Bool {
+        let resources = doc.resources
+        guard !resources.isEmpty else { return false }
+        for r in resources {
+            let rel = r.relativePath
+            guard !rel.isEmpty else { return false }
+            let file = archiveRoot.appendingPathComponent(rel)
+            guard FileManager.default.fileExists(atPath: file.path) else { return false }
+            if r.size > 0 {
+                let attrs = try? FileManager.default.attributesOfItem(atPath: file.path)
+                if let n = attrs?[.size] as? NSNumber, n.int64Value != r.size {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
     /// Low-memory streaming verify: one sidecar at a time, progress deltas, no giant retained ID list.
     public static func verifyStream(
         archiveRoot: URL,
