@@ -26,11 +26,6 @@ struct RootView: View {
         let n = importer.verifiedReadyCount
         return n > 0 ? "Delete Verified (\(n))" : "Delete Verified"
     }
-    private var pauseResumeLabel: String {
-        if importer.needsReconnect { return "Resume (reconnect)" }
-        return importer.isPaused ? "Resume" : "Pause"
-    }
-
     var body: some View {
         NavigationStack {
             Form {
@@ -56,8 +51,15 @@ struct RootView: View {
                     .tint(.red)
                     .disabled(importer.verifiedReadyCount == 0)
 
-                    if importer.isRunning {
-                        Button(pauseResumeLabel) {
+                    if importer.needsReconnect {
+                        Button(importer.isRunning ? "Reconnect" : "Reconnect (start fresh)") {
+                            importer.reconnect(pin: pin)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                        .disabled(pin.count < 4 && !importer.isRunning)
+                    } else if importer.isRunning {
+                        Button(importer.isPaused ? "Resume" : "Pause") {
                             if importer.isPaused { importer.resume() }
                             else { importer.pause() }
                         }
@@ -82,7 +84,7 @@ struct RootView: View {
                         )
                     }
 
-                    Text("Import copies to the Mac. Keep the app foregrounded — backgrounding pauses and Resume reconnects if the link dropped. Scan leftovers verifies the archive and queues matching phone assets for Delete Verified.")
+                    Text("Import copies to the Mac. Keep the app foregrounded — backgrounding pauses. If the link drops, use Reconnect. Scan leftovers verifies the archive and queues matching phone assets for Delete Verified.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

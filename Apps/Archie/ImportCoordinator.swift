@@ -11,7 +11,7 @@ final class ImportCoordinator: ObservableObject {
     @Published var summary = ImportSummary()
     @Published var isRunning = false
     @Published var isPaused = false
-    /// Waiting for Resume to Bonjour+HELLO again after a dead link.
+    /// Show Reconnect: mid-run link loss, or a failed setup that can start fresh.
     @Published private(set) var needsReconnect = false
     /// True while Mac is streaming archive SHA-256 verification (Scan leftovers).
     @Published private(set) var isScanning = false
@@ -41,6 +41,8 @@ final class ImportCoordinator: ObservableObject {
     private var settledOnMac: Set<String> = []
     /// Pause was triggered by leaving the foreground (auto-resume on active).
     private var pausedForBackground = false
+    /// Setup failed after `run` exits — keep Reconnect and restart Import from scratch.
+    private var retryImportAfterFailure = false
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -62,7 +64,7 @@ final class ImportCoordinator: ObservableObject {
         // Offer delete for everything already verified (Photos confirmation).
         // Queue is only drained for assets that actually delete — declined stay ready.
         if needsReconnect {
-            status = "Stopped — connection lost. Tap Resume to reconnect (\(progress)/\(total))"
+            status = "Stopped — connection lost. Tap Reconnect (\(progress)/\(total))"
         } else if pendingDeletes.isEmpty {
             status = "Paused — finishing current asset, then holding"
         } else {
@@ -100,6 +102,32 @@ final class ImportCoordinator: ObservableObject {
         }
         status = needsReconnect ? "Reconnecting…" : "Checking connection…"
         Task { await resumeAfterConnectionCheck() }
+    }
+
+    /// Mid-run reconnect, or a fresh Import after a setup/connect failure.
+    func reconnect(pin: String) {
+        if isRunning {
+            resume()
+            return
+        }
+        guard !isScanning else { return }
+        let usePin = pin.count >= 4 ? pin : (sessionPin.isEmpty ? settings.lastPin : sessionPin)
+        guard usePin.count >= 4 else {
+            status = "Enter PIN to reconnect"
+            return
+        }
+        needsReconnect = false
+        retryImportAfterFailure = false
+        status = "Reconnecting…"
+        Task { await run(pin: usePin) }
+    }
+
+    /// Leave Reconnect visible after `run` returns so the user can start fresh.
+    private func offerFreshReconnect(_ message: String) {
+        retryImportAfterFailure = true
+        needsReconnect = true
+        isPaused = false
+        status = "\(message). Tap Reconnect"
     }
 
     private func resumeAfterConnectionCheck() async {
@@ -140,7 +168,7 @@ final class ImportCoordinator: ObservableObject {
         } catch {
             needsReconnect = true
             isPaused = true
-            status = "Reconnect failed — tap Resume when Mac is ready"
+            status = "Reconnect failed — tap Reconnect when Mac is ready"
         }
     }
 
@@ -148,7 +176,7 @@ final class ImportCoordinator: ObservableObject {
         needsReconnect = true
         isPaused = true
         pausedForBackground = false
-        status = "Stopped — connection lost. Tap Resume to reconnect (\(progress)/\(total))"
+        status = "Stopped — connection lost. Tap Reconnect (\(progress)/\(total))"
     }
 
     /// Delete whatever is verified and ready (import queue and/or leftover scan).
@@ -224,18 +252,25 @@ final class ImportCoordinator: ObservableObject {
         isRunning = true
         isPaused = false
         needsReconnect = false
+        retryImportAfterFailure = false
         pausedForBackground = false
         sessionPin = pin
         settledOnMac = []
         defer {
+            let keepRetry = retryImportAfterFailure
             isRunning = false
             isPaused = false
-            needsReconnect = false
             pausedForBackground = false
             activeClient = nil
-            sessionPin = ""
             settledOnMac = []
             UIApplication.shared.isIdleTimerDisabled = false
+            if keepRetry {
+                // Keep sessionPin + Reconnect so the user can start fresh.
+                needsReconnect = true
+            } else {
+                needsReconnect = false
+                sessionPin = ""
+            }
         }
         UIApplication.shared.isIdleTimerDisabled = true
         summary = ImportSummary()
@@ -253,7 +288,7 @@ final class ImportCoordinator: ObservableObject {
         do {
             try await client.connect()
         } catch {
-            status = "Connect failed: \(error.localizedDescription)"
+            offerFreshReconnect("Connect failed: \(error.localizedDescription)")
             return
         }
         activeClient = client
@@ -262,9 +297,17 @@ final class ImportCoordinator: ObservableObject {
         do {
             settledOnMac = try await client.fetchSettledIds()
         } catch {
-            status = "Settled IDs failed: \(error.localizedDescription)"
-            try? await client.endSession()
-            return
+            // Optional optimization — if the link is still up, continue without skip.
+            // If the Mac session died (e.g. old receiver), offer Reconnect to start fresh.
+            if Self.isConnectionLost(error) || !client.isAlive {
+                try? await client.endSession()
+                offerFreshReconnect(
+                    "Settled IDs failed (is Mac receiver up to date?): \(error.localizedDescription)"
+                )
+                return
+            }
+            settledOnMac = []
+            status = "Settled IDs unavailable — continuing without skip…"
         }
 
         status = "Loading protected-seen log…"
@@ -272,8 +315,8 @@ final class ImportCoordinator: ObservableObject {
         do {
             protectedSeen = try await client.fetchProtectedSeen()
         } catch {
-            status = "Protected-seen log failed: \(error.localizedDescription)"
             try? await client.endSession()
+            offerFreshReconnect("Protected-seen log failed: \(error.localizedDescription)")
             return
         }
 
@@ -339,7 +382,7 @@ final class ImportCoordinator: ObservableObject {
                 }
                 while isPaused {
                     if needsReconnect {
-                        status = "Stopped — connection lost. Tap Resume to reconnect (\(progress)/\(total))"
+                        status = "Stopped — connection lost. Tap Reconnect (\(progress)/\(total))"
                     } else {
                         status = pendingDeletes.isEmpty
                             ? "Paused at \(progress)/\(total)"
