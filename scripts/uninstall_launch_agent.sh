@@ -13,4 +13,8 @@ for label in "${WATCH_LABEL}" "${MENU_LABEL}"; do
 done
 
 pkill -f '/\.build/.*/archie-menubar$' 2>/dev/null || true
+pkill -f 'Archie Menu.app/Contents/MacOS/archie-menubar' 2>/dev/null || true
+rm -rf \
+  "${HOME}/Applications/Archie Menu.app" \
+  "${HOME}/Library/Application Support/Archie/Archie Menu.app"
 echo "Removed Archie LaunchAgents (USB watcher + menu bar)"

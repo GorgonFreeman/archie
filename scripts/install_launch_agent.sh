@@ -12,7 +12,8 @@ WATCH_PLIST="${HOME}/Library/LaunchAgents/${WATCH_LABEL}.plist"
 MENU_PLIST="${HOME}/Library/LaunchAgents/${MENU_LABEL}.plist"
 LOG_DIR="${HOME}/Library/Logs/archie"
 ARCHIVE="${ARCHIE_ARCHIVE:-${HOME}/Pictures/ArchieArchive}"
-APP_DIR="${HOME}/Library/Application Support/Archie/Archie Menu.app"
+APP_DIR="${HOME}/Applications/Archie Menu.app"
+LEGACY_APP_DIR="${HOME}/Library/Application Support/Archie/Archie Menu.app"
 MENUBAR_EXEC="${APP_DIR}/Contents/MacOS/archie-menubar"
 
 chmod +x \
@@ -31,10 +32,13 @@ echo "Building release binaries…"
 )
 
 echo "Packaging menu bar app…"
-rm -rf "${APP_DIR}"
+mkdir -p "${HOME}/Applications"
+rm -rf "${APP_DIR}" "${LEGACY_APP_DIR}"
 mkdir -p "${APP_DIR}/Contents/MacOS"
 cp "${ARCHIE_ROOT}/.build/release/archie-menubar" "${MENUBAR_EXEC}"
 chmod +x "${MENUBAR_EXEC}"
+printf 'APPL????' > "${APP_DIR}/Contents/PkgInfo"
+defaults write com.manuscanis.archie.menubar "NSStatusItem Preferred Position archie.pin" -float 12000
 cat > "${APP_DIR}/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -97,6 +101,7 @@ cat > "${WATCH_PLIST}" <<EOF
 </plist>
 EOF
 
+# Launch the .app via `open` (Launch Services) so the status item appears in the menu bar.
 cat > "${MENU_PLIST}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -106,12 +111,18 @@ cat > "${MENU_PLIST}" <<EOF
   <string>${MENU_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${MENUBAR_EXEC}</string>
+    <string>/usr/bin/open</string>
+    <string>-W</string>
+    <string>-n</string>
+    <string>-a</string>
+    <string>${APP_DIR}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
   <key>StandardOutPath</key>
   <string>${LOG_DIR}/menubar.stdout.log</string>
   <key>StandardErrorPath</key>
@@ -135,5 +146,4 @@ echo "Installed:"
 echo "  ${WATCH_PLIST}"
 echo "  ${MENU_PLIST}"
 echo "Menu bar app: ${APP_DIR}"
-echo 'Look for Archie near the clock, or the menu bar overflow chevron.'
 echo "Uninstall: ${SCRIPT_DIR}/uninstall_launch_agent.sh"

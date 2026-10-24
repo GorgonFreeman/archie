@@ -20,7 +20,7 @@ pnpm stop
 
 Checks USB every 5s. On connect it starts the receiver, shows a notification with the PIN, and writes it to `~/Library/Application Support/Archie/current_pin.txt`. Unplugging stops the receiver.
 
-Also installs a **menu bar** app: click **Archie** for the PIN (and Copy). While the receiver is live the PIN appears in the menu bar title too.
+Also installs a **menu bar** app (icon **A**): click for the PIN, Copy, or re-show the notification. The USB watcher still posts a PIN notification on connect.
 
 ```bash
 ./scripts/uninstall_launch_agent.sh
