@@ -4,7 +4,7 @@ Copy photos and videos from an iPhone to a Mac. Verify each file with SHA-256, t
 
 ## Mac receiver
 
-Writes **flat** into the archive root (no `YYYY/MM/` nesting).
+Writes **flat** files into `ArchieArchive/<device name>/` (the iPhone’s name; no `YYYY/MM/` nesting).
 
 ```bash
 pnpm start    # build release receiver, start it, print PIN

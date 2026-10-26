@@ -7,15 +7,13 @@ final class ReceiverServer {
     private let archiveRoot: URL
     private let pin: String
     private let identity: SecIdentity
-    private let manifest: ManifestStore
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "archie.receiver")
 
-    init(archiveRoot: URL, pin: String, identity: SecIdentity, manifest: ManifestStore) {
+    init(archiveRoot: URL, pin: String, identity: SecIdentity) {
         self.archiveRoot = archiveRoot
         self.pin = pin
         self.identity = identity
-        self.manifest = manifest
     }
 
     func start() throws {
@@ -46,8 +44,7 @@ final class ReceiverServer {
         let handler = SessionHandler(
             io: io,
             archiveRoot: archiveRoot,
-            pin: pin,
-            manifest: manifest
+            pin: pin
         )
         connection.stateUpdateHandler = { state in
             fputs("conn \(state)\n", stderr)

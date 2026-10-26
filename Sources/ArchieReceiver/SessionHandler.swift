@@ -9,22 +9,25 @@ private struct ReceivedResource {
 
 /// Mac side: receives one resource at a time, writes atomically, replies with receipt/fail.
 /// After phone requests settle, renames the asset before acknowledging.
+/// Files land in `baseArchiveRoot/<device name>/` after HELLO.
 final class SessionHandler {
     private let io: ConnectionIO
-    private let archiveRoot: URL
+    private let baseArchiveRoot: URL
     private let pin: String
-    private let manifest: ManifestStore
+    /// Set in `expectHello` to the per-device folder.
+    private var archiveRoot: URL
+    private var manifest: ManifestStore?
     private var writer: AtomicWriter?
     private var currentBegin: AssetBeginPayload?
 
     private var assetResources: [String: [ReceivedResource]] = [:]
     private var assetCreationDates: [String: Date] = [:]
 
-    init(io: ConnectionIO, archiveRoot: URL, pin: String, manifest: ManifestStore) {
+    init(io: ConnectionIO, archiveRoot: URL, pin: String) {
         self.io = io
+        self.baseArchiveRoot = archiveRoot
         self.archiveRoot = archiveRoot
         self.pin = pin
-        self.manifest = manifest
     }
 
     func run() async {
@@ -73,11 +76,30 @@ final class SessionHandler {
             try await io.sendJSON(type: .fail, value: FailPayload(reason: "bad pin"))
             throw ReceiverError.badPin
         }
+
+        let deviceRoot = DeviceArchive.root(
+            baseArchiveRoot: baseArchiveRoot,
+            deviceName: hello.deviceName
+        )
+        try FileManager.default.createDirectory(at: deviceRoot, withIntermediateDirectories: true)
+        archiveRoot = deviceRoot
+        manifest = try ManifestStore(archiveRoot: deviceRoot)
+
         try await io.sendJSON(
             type: .hello,
             value: HelloPayload(role: "mac", deviceName: Host.current().localizedName)
         )
-        fputs("paired with \(hello.deviceName ?? "iphone")\n", stderr)
+        fputs(
+            "paired with \(hello.deviceName ?? "iphone") → \(deviceRoot.path)\n",
+            stderr
+        )
+    }
+
+    private func requireManifest() throws -> ManifestStore {
+        guard let manifest else {
+            throw ReceiverError.protocolError("session not ready (no HELLO)")
+        }
+        return manifest
     }
 
     private func beginResource(_ payload: Data) async throws {
@@ -102,6 +124,7 @@ final class SessionHandler {
     }
 
     private func endResource(_ payload: Data) async throws {
+        let manifest = try requireManifest()
         guard let writer, let begin = currentBegin else {
             throw ReceiverError.protocolError("end without begin")
         }
@@ -151,8 +174,11 @@ final class SessionHandler {
 
     private func sendProtectedSeen() async throws {
         do {
-            // Log only — do not rescan sidecars on the hot path (slow / memory-heavy).
-            let ids = ProtectedSeenLog.load(archiveRoot: archiveRoot)
+            var ids = ProtectedSeenLog.load(archiveRoot: archiveRoot)
+            // Legacy flat archive at the base root (pre device-folder layout).
+            if archiveRoot.standardizedFileURL != baseArchiveRoot.standardizedFileURL {
+                ids.formUnion(ProtectedSeenLog.load(archiveRoot: baseArchiveRoot))
+            }
             try await io.sendJSON(
                 type: .protectedSeenResult,
                 value: ProtectedSeenPayload(assetIds: Array(ids).sorted())
@@ -162,22 +188,6 @@ final class SessionHandler {
             try await io.sendJSON(
                 type: .fail,
                 value: FailPayload(reason: "protected log: \(error.localizedDescription)")
-            )
-        }
-    }
-
-    private func sendSettledIds() async throws {
-        do {
-            let ids = ArchiveIndex.listPresentAssetIds(archiveRoot: archiveRoot)
-            try await io.sendJSON(
-                type: .settledIdsResult,
-                value: SettledIdsPayload(assetIds: Array(ids).sorted())
-            )
-            fputs("settled ids: \(ids.count)\n", stderr)
-        } catch {
-            try await io.sendJSON(
-                type: .fail,
-                value: FailPayload(reason: "settled ids: \(error.localizedDescription)")
             )
         }
     }
@@ -198,24 +208,65 @@ final class SessionHandler {
         }
     }
 
+    private func sendSettledIds() async throws {
+        do {
+            var ids = ArchiveIndex.listPresentAssetIds(archiveRoot: archiveRoot)
+            if archiveRoot.standardizedFileURL != baseArchiveRoot.standardizedFileURL {
+                ids.formUnion(ArchiveIndex.listPresentAssetIds(archiveRoot: baseArchiveRoot))
+            }
+            try await io.sendJSON(
+                type: .settledIdsResult,
+                value: SettledIdsPayload(assetIds: Array(ids).sorted())
+            )
+            fputs("settled ids: \(ids.count)\n", stderr)
+        } catch {
+            try await io.sendJSON(
+                type: .fail,
+                value: FailPayload(reason: "settled ids: \(error.localizedDescription)")
+            )
+        }
+    }
+
     private func sendArchiveIndex() async throws {
         fputs("archive index: streaming verify (sha256)…\n", stderr)
         var completeTotal = 0
         var lastIncomplete = 0
-        for await progress in ArchiveIndex.verifyStream(archiveRoot: archiveRoot, progressEvery: 15) {
-            completeTotal += progress.completeAssetIds.count
-            lastIncomplete = progress.incompleteCount
-            try await io.sendJSON(
-                type: .archiveIndexProgress,
-                value: ArchiveIndexProgressPayload(
-                    scanned: progress.scanned,
-                    total: progress.total,
-                    incompleteCount: progress.incompleteCount,
-                    completeAssetIds: progress.completeAssetIds,
-                    finished: progress.finished
+
+        func stream(_ root: URL) async throws {
+            var incompleteThisRoot = 0
+            for await progress in ArchiveIndex.verifyStream(archiveRoot: root, progressEvery: 15) {
+                completeTotal += progress.completeAssetIds.count
+                incompleteThisRoot = progress.incompleteCount
+                try await io.sendJSON(
+                    type: .archiveIndexProgress,
+                    value: ArchiveIndexProgressPayload(
+                        scanned: progress.scanned,
+                        total: progress.total,
+                        incompleteCount: lastIncomplete + incompleteThisRoot,
+                        completeAssetIds: progress.completeAssetIds,
+                        finished: false
+                    )
                 )
-            )
+            }
+            lastIncomplete += incompleteThisRoot
         }
+
+        try await stream(archiveRoot)
+        // Legacy flat files directly under the base archive (skips device subfolders).
+        if archiveRoot.standardizedFileURL != baseArchiveRoot.standardizedFileURL {
+            try await stream(baseArchiveRoot)
+        }
+
+        try await io.sendJSON(
+            type: .archiveIndexProgress,
+            value: ArchiveIndexProgressPayload(
+                scanned: completeTotal,
+                total: completeTotal,
+                incompleteCount: lastIncomplete,
+                completeAssetIds: [],
+                finished: true
+            )
+        )
         try await io.sendJSON(
             type: .archiveIndexResult,
             value: ArchiveIndexPayload(assetIds: [], incompleteCount: lastIncomplete)
@@ -227,6 +278,7 @@ final class SessionHandler {
     }
 
     private func settleAsset(_ payload: Data) async throws {
+        let manifest = try requireManifest()
         let request = try MessageCodec.decode(AssetSettlePayload.self, from: payload)
         guard let resources = assetResources[request.assetId], !resources.isEmpty else {
             try await io.sendJSON(
@@ -252,7 +304,6 @@ final class SessionHandler {
                 resources: settled,
                 manifest: manifest
             )
-            // Update session paths so a retry sees new names.
             assetResources[request.assetId] = settled.map { r in
                 ReceivedResource(
                     relativePath: pathMap[r.relativePath] ?? r.relativePath,
@@ -260,7 +311,6 @@ final class SessionHandler {
                     isSidecar: r.isSidecar
                 )
             }
-            // Sidecar content hash changed — refresh from disk if present.
             if var list = assetResources[request.assetId] {
                 for i in list.indices where list[i].isSidecar {
                     let url = archiveRoot.appendingPathComponent(list[i].relativePath)
