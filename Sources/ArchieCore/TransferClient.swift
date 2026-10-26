@@ -82,6 +82,46 @@ public final class TransferClient: @unchecked Sendable {
         }
     }
 
+    /// Push the phone library assetId list so the Mac can write a checkpoint file.
+    public func sendLibraryInventory(
+        deviceName: String,
+        label: String,
+        assetIds: [String]
+    ) async throws -> LibraryInventoryAckPayload {
+        guard let io else { throw TransferError.notConnected }
+        try await io.sendJSON(
+            type: .libraryInventoryBegin,
+            value: LibraryInventoryBeginPayload(
+                deviceName: deviceName,
+                total: assetIds.count,
+                label: label
+            )
+        )
+        let chunkSize = 500
+        var start = assetIds.startIndex
+        while start < assetIds.endIndex {
+            let end = assetIds.index(start, offsetBy: chunkSize, limitedBy: assetIds.endIndex)
+                ?? assetIds.endIndex
+            let chunk = Array(assetIds[start..<end])
+            start = end
+            try await io.sendJSON(
+                type: .libraryInventoryChunk,
+                value: SettledIdsPayload(assetIds: chunk)
+            )
+        }
+        try await io.send(type: .libraryInventoryEnd)
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
+        switch type {
+        case .libraryInventoryAck:
+            return try MessageCodec.decode(LibraryInventoryAckPayload.self, from: payload)
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected LIBRARY_INVENTORY_ACK")
+        }
+    }
+
     /// Settled archive assetIds (resources present on disk). Fast — no SHA verify.
     public func fetchSettledIds() async throws -> Set<String> {
         guard let io else { throw TransferError.notConnected }

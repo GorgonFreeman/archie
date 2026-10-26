@@ -5,6 +5,7 @@
     "start": "bash ./scripts/start_receiver.sh",
     "stop": "bash ./scripts/watch_iphone_receiver.sh --stop",
     "status": "bash ./scripts/watch_iphone_receiver.sh --status",
-    "redeploy": "bash ./scripts/redeploy_ios.sh"
+    "redeploy": "bash ./scripts/redeploy_ios.sh",
+    "compare-checkpoints": "bash ./scripts/compare_checkpoints.sh"
   }
 }

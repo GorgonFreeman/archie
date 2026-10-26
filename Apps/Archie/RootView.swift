@@ -44,6 +44,11 @@ struct RootView: View {
                     }
                     .disabled(busy || !canConnect)
 
+                    Button("Checkpoint") {
+                        Task { await importer.snapshot(pin: pin, label: "baseline") }
+                    }
+                    .disabled(busy || !canConnect)
+
                     Button(deleteLabel) {
                         importer.deleteVerified()
                     }

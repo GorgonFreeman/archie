@@ -52,6 +52,8 @@ final class SessionHandler {
                     try await markProtectedSeen(payload)
                 case .settledIdsFetch:
                     try await sendSettledIds()
+                case .libraryInventoryBegin:
+                    try await receiveLibraryInventory(firstPayload: payload)
                 case .ping:
                     try await io.send(type: .pong)
                 case .sessionEnd:
@@ -224,6 +226,50 @@ final class SessionHandler {
                 type: .fail,
                 value: FailPayload(reason: "settled ids: \(error.localizedDescription)")
             )
+        }
+    }
+
+    private func receiveLibraryInventory(firstPayload: Data) async throws {
+        let begin = try MessageCodec.decode(LibraryInventoryBeginPayload.self, from: firstPayload)
+        var ids: [String] = []
+        ids.reserveCapacity(max(0, begin.total))
+        while true {
+            let (type, payload) = try await io.receive()
+            switch type {
+            case .libraryInventoryChunk:
+                let chunk = try MessageCodec.decode(SettledIdsPayload.self, from: payload)
+                ids.append(contentsOf: chunk.assetIds)
+            case .libraryInventoryEnd:
+                let checkpoint = LibraryCheckpoint(
+                    label: begin.label.isEmpty ? "manual" : begin.label,
+                    deviceName: begin.deviceName,
+                    assetIds: ids
+                )
+                do {
+                    let url = try LibraryCheckpointStore.save(checkpoint)
+                    try await io.sendJSON(
+                        type: .libraryInventoryAck,
+                        value: LibraryInventoryAckPayload(
+                            assetCount: checkpoint.assetCount,
+                            path: url.path
+                        )
+                    )
+                    fputs(
+                        "checkpoint \(checkpoint.label): \(checkpoint.assetCount) assets → \(url.path)\n",
+                        stderr
+                    )
+                } catch {
+                    try await io.sendJSON(
+                        type: .fail,
+                        value: FailPayload(reason: "checkpoint: \(error.localizedDescription)")
+                    )
+                }
+                return
+            case .fail:
+                return
+            default:
+                throw ReceiverError.protocolError("unexpected frame during library inventory")
+            }
         }
     }
 

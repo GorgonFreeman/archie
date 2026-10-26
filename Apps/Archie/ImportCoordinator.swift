@@ -200,6 +200,73 @@ final class ImportCoordinator: ObservableObject {
         }
     }
 
+    /// Push the current phone library ID list to the Mac as a checkpoint file.
+    func snapshot(pin: String, label: String = "baseline") async {
+        guard !isRunning, !isScanning else { return }
+        guard pin.count >= 4 else {
+            status = "Enter PIN to snapshot"
+            return
+        }
+        settings.lastPin = pin
+        isScanning = true
+        defer { isScanning = false }
+
+        _ = await PhotoAccess.request()
+        guard PhotoAccess.canImport else {
+            status = "Photos access required"
+            return
+        }
+
+        status = "Connecting to snapshot…"
+        let client = TransferClient(pin: pin, deviceName: UIDevice.current.name)
+        do {
+            try await client.connect()
+        } catch {
+            status = "Snapshot connect failed: \(error.localizedDescription)"
+            return
+        }
+        activeClient = client
+        defer {
+            activeClient = nil
+        }
+
+        do {
+            let ack = try await pushLibraryInventory(client: client, label: label)
+            try? await client.endSession()
+            status = "Checkpoint \(label): \(ack.assetCount) assets"
+        } catch {
+            try? await client.endSession()
+            status = "Snapshot failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func pushLibraryInventory(
+        client: TransferClient,
+        label: String
+    ) async throws -> LibraryInventoryAckPayload {
+        status = "Listing phone library…"
+        let ids = Self.allLibraryAssetIds()
+        status = "Sending checkpoint (\(ids.count) assets)…"
+        return try await client.sendLibraryInventory(
+            deviceName: UIDevice.current.name,
+            label: label,
+            assetIds: ids
+        )
+    }
+
+    private static func allLibraryAssetIds() -> [String] {
+        let opts = PHFetchOptions()
+        opts.includeHiddenAssets = true
+        opts.includeAllBurstAssets = true
+        let fetch = PHAsset.fetchAssets(with: opts)
+        var ids: [String] = []
+        ids.reserveCapacity(fetch.count)
+        fetch.enumerateObjects { asset, _, _ in
+            ids.append(asset.localIdentifier)
+        }
+        return ids
+    }
+
     /// Verify Mac archive (SHA-256) and accumulate phone leftovers for Delete Verified.
     func scanLeftovers(pin: String) async {
         guard !isRunning, !isScanning else { return }
@@ -292,6 +359,15 @@ final class ImportCoordinator: ObservableObject {
             return
         }
         activeClient = client
+
+        // Baseline for delete-vs-import audits (compare with post-import checkpoint).
+        do {
+            let ack = try await pushLibraryInventory(client: client, label: "pre-import")
+            status = "Pre-import checkpoint: \(ack.assetCount) assets"
+        } catch {
+            // Non-fatal — import can still proceed.
+            status = "Pre-import checkpoint skipped: \(error.localizedDescription)"
+        }
 
         status = "Loading settled archive IDs…"
         do {
@@ -448,10 +524,19 @@ final class ImportCoordinator: ObservableObject {
             await flushPendingDeletes()
         }
 
+        if let client = activeClient, client.isAlive {
+            do {
+                let ack = try await pushLibraryInventory(client: client, label: "post-import")
+                status = "Post-import checkpoint: \(ack.assetCount) assets"
+            } catch {
+                // Non-fatal.
+            }
+        }
+
         try? await activeClient?.endSession()
         if pendingDeletes.count + leftoverReadyIds.count > 0 {
             let n = pendingDeletes.count + leftoverReadyIds.count
-            status = "Finished — \(n) verified still ready to delete"
+            status = "Finished — \(n) verified still ready to delete (deleted \(summary.deleted))"
         } else {
             status = "Finished — deleted \(summary.deleted), retained \(summary.retained)"
         }

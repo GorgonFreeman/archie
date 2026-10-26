@@ -30,6 +30,14 @@ public enum FrameType: UInt8, Sendable {
     case settledIdsFetch = 18
     /// Mac → Phone: `SettledIdsPayload`.
     case settledIdsResult = 19
+    /// Phone → Mac: start pushing a library inventory (`LibraryInventoryBeginPayload`).
+    case libraryInventoryBegin = 20
+    /// Phone → Mac: chunk of assetIds (`SettledIdsPayload`).
+    case libraryInventoryChunk = 21
+    /// Phone → Mac: inventory stream finished (empty payload).
+    case libraryInventoryEnd = 22
+    /// Mac → Phone: inventory saved (`LibraryInventoryAckPayload`).
+    case libraryInventoryAck = 23
 }
 
 public struct HelloPayload: Codable, Sendable {
@@ -185,6 +193,29 @@ public struct SettledIdsPayload: Codable, Sendable {
 
     public init(assetIds: [String]) {
         self.assetIds = assetIds
+    }
+}
+
+public struct LibraryInventoryBeginPayload: Codable, Sendable {
+    public var deviceName: String
+    public var total: Int
+    /// Optional label: `baseline`, `pre-import`, `post-import`, `manual`, …
+    public var label: String
+
+    public init(deviceName: String, total: Int, label: String = "manual") {
+        self.deviceName = deviceName
+        self.total = total
+        self.label = label
+    }
+}
+
+public struct LibraryInventoryAckPayload: Codable, Sendable {
+    public var assetCount: Int
+    public var path: String
+
+    public init(assetCount: Int, path: String) {
+        self.assetCount = assetCount
+        self.path = path
     }
 }
 
