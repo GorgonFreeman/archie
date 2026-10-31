@@ -26,6 +26,8 @@
 		E8B8F7EDFF174E06997D64AE /* Sha256Hasher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05398B4277B84C26B95392AB /* Sha256Hasher.swift */; };
 		6B049F24CA564375B6129B1F /* Sidecar.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEC691065C4F4B08B0A04F66 /* Sidecar.swift */; };
 		AE1D7D5BCE5F459AAC0BFF71 /* TransferClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD42A2C3DA794FA19CBFF66C /* TransferClient.swift */; };
+		A9F5D2240C04477FBA2B6CE8 /* RecentSeenLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5311923C93D46EC848F90D1 /* RecentSeenLog.swift */; };
+		DFF183AB5D0342028708013C /* ArchiveLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = E05C655E91B74CA0857930FB /* ArchiveLock.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,6 +50,8 @@
 		05398B4277B84C26B95392AB /* Sha256Hasher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Sha256Hasher.swift; path = ../Sources/ArchieCore/Sha256Hasher.swift; sourceTree = "<group>"; };
 		BEC691065C4F4B08B0A04F66 /* Sidecar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Sidecar.swift; path = ../Sources/ArchieCore/Sidecar.swift; sourceTree = "<group>"; };
 		DD42A2C3DA794FA19CBFF66C /* TransferClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TransferClient.swift; path = ../Sources/ArchieCore/TransferClient.swift; sourceTree = "<group>"; };
+		F5311923C93D46EC848F90D1 /* RecentSeenLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RecentSeenLog.swift; path = ../Sources/ArchieCore/RecentSeenLog.swift; sourceTree = "<group>"; };
+		E05C655E91B74CA0857930FB /* ArchiveLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ArchiveLock.swift; path = ../Sources/ArchieCore/ArchiveLock.swift; sourceTree = "<group>"; };
 		B39A3B5D4FAC48C798377BCB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8B68843FAB5E4DB99315FF2B /* Archie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Archie.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -102,11 +106,13 @@
 			isa = PBXGroup;
 			children = (
 				671A6879E476482185F4F541 /* ArchiveLayout.swift */,
+				E05C655E91B74CA0857930FB /* ArchiveLock.swift */,
 				7D4077446971493FB4CB5D1B /* AtomicWriter.swift */,
 				1409DC0405A24831BB69E4CF /* Constants.swift */,
 				7742DE7F7A344A0E93DBEDEE /* FrameCodec.swift */,
 				F417704E30634F9DA5DA7CC4 /* Manifest.swift */,
 				64D4E682BD7641E1A088072A /* Message.swift */,
+				F5311923C93D46EC848F90D1 /* RecentSeenLog.swift */,
 				05398B4277B84C26B95392AB /* Sha256Hasher.swift */,
 				BEC691065C4F4B08B0A04F66 /* Sidecar.swift */,
 				DD42A2C3DA794FA19CBFF66C /* TransferClient.swift */,
@@ -196,6 +202,8 @@
 				E8B8F7EDFF174E06997D64AE /* Sha256Hasher.swift in Sources */,
 				6B049F24CA564375B6129B1F /* Sidecar.swift in Sources */,
 				AE1D7D5BCE5F459AAC0BFF71 /* TransferClient.swift in Sources */,
+				A9F5D2240C04477FBA2B6CE8 /* RecentSeenLog.swift in Sources */,
+				DFF183AB5D0342028708013C /* ArchiveLock.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
