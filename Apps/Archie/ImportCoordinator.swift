@@ -395,6 +395,7 @@ final class ImportCoordinator: ObservableObject {
 
         let protection = ProtectionPolicy(
             protectFavourites: settings.protectFavourites,
+            protectLast30Days: settings.protectLast30Days,
             protectedAlbumIds: Set(settings.protectedAlbumIds)
         )
         let protectedByAlbum = Self.assetIdsInProtectedAlbums(settings: settings)
@@ -810,6 +811,8 @@ final class ImportCoordinator: ObservableObject {
         return false
     }
 
+    /// Favourites / protected albums only — recent-window protection is handled separately
+    /// so Import can mark `.recent_seen_log` instead of `.protected_seen_log`.
     private static func isProtected(
         _ asset: PHAsset,
         policy: ProtectionPolicy,
@@ -896,6 +899,7 @@ final class ImportCoordinator: ObservableObject {
         guard PhotoAccess.canDelete || PhotoAccess.canImport else { return [] }
         let policy = ProtectionPolicy(
             protectFavourites: settings.protectFavourites,
+            protectLast30Days: settings.protectLast30Days,
             protectedAlbumIds: Set(settings.protectedAlbumIds)
         )
         var out: [String] = []

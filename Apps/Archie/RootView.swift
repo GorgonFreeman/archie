@@ -89,7 +89,7 @@ struct RootView: View {
                         )
                     }
 
-                    Text("Import copies to the Mac. Keep the app foregrounded — backgrounding pauses. If the link drops, use Reconnect. With Protect last 30 days on, recent assets stay on the phone until they age out (then Delete Verified). Scan leftovers verifies the archive and queues matching phone assets for Delete Verified.")
+                    Text("Import copies to the Mac. Keep the app foregrounded — backgrounding pauses. If the link drops, use Reconnect. With Protect last 30 days on, recent assets stay on the phone (Import and Scan leftovers skip them for delete) until they age out. Scan leftovers verifies the archive and queues matching unprotected phone assets for Delete Verified.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

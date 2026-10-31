@@ -36,6 +36,7 @@ enum DeletionService {
 
         let policy = ProtectionPolicy(
             protectFavourites: settings.protectFavourites,
+            protectLast30Days: settings.protectLast30Days,
             protectedAlbumIds: Set(settings.protectedAlbumIds)
         )
 
@@ -55,8 +56,12 @@ enum DeletionService {
             }
 
             let albums = ProtectionPolicy.albumIds(containing: asset)
-            if policy.isProtected(asset, albumIds: albums) {
+            if policy.isFavouriteOrAlbumProtected(asset, albumIds: albums) {
                 results[copy.assetId] = .retained(.protected)
+                continue
+            }
+            if policy.isRecentProtected(asset) {
+                results[copy.assetId] = .retained(.recentProtected)
                 continue
             }
 
@@ -103,6 +108,7 @@ enum DeletionService {
 
         let policy = ProtectionPolicy(
             protectFavourites: settings.protectFavourites,
+            protectLast30Days: settings.protectLast30Days,
             protectedAlbumIds: Set(settings.protectedAlbumIds)
         )
 
@@ -116,8 +122,12 @@ enum DeletionService {
                 continue
             }
             let albums = ProtectionPolicy.albumIds(containing: asset)
-            if policy.isProtected(asset, albumIds: albums) {
+            if policy.isFavouriteOrAlbumProtected(asset, albumIds: albums) {
                 results[id] = .retained(.protected)
+                continue
+            }
+            if policy.isRecentProtected(asset) {
+                results[id] = .retained(.recentProtected)
                 continue
             }
             toDelete.append(asset)
