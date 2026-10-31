@@ -11,6 +11,9 @@ public enum ArchieConstants {
     public static let protectedSeenLogName = ".protected_seen_log"
     /// Migrated once into `protectedSeenLogName`.
     public static let legacyFavouritesSeenLogName = ".favourites_seen_log"
+    /// AssetIds imported while "protect last N days" was on — delete once they age out.
+    public static let recentSeenLogName = ".recent_seen_log"
+    public static let recentProtectDayCount = 30
     public static let sidecarSuffix = ".asset.json"
     /// Max wait for a normal reply (hello, settle, ping, receipt after send).
     public static let ioTimeoutNanoseconds: UInt64 = 120_000_000_000

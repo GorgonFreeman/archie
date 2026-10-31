@@ -250,6 +250,59 @@ public final class TransferClient: @unchecked Sendable {
         }
     }
 
+    /// Recent-window assets kept on phone (`.recent_seen_log`).
+    public func fetchRecentSeen() async throws -> [RecentSeenEntry] {
+        guard let io else { throw TransferError.notConnected }
+        try await io.send(type: .recentSeenFetch)
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
+        switch type {
+        case .recentSeenResult:
+            let body = try MessageCodec.decode(RecentSeenPayload.self, from: payload)
+            return body.entries
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected RECENT_SEEN_RESULT")
+        }
+    }
+
+    public func markRecentSeen(assetId: String, creationDate: Date?) async throws {
+        guard let io else { throw TransferError.notConnected }
+        try await io.sendJSON(
+            type: .recentSeenMark,
+            value: RecentSeenMarkPayload(assetId: assetId, creationDate: creationDate)
+        )
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
+        switch type {
+        case .recentSeenResult:
+            _ = try MessageCodec.decode(RecentSeenPayload.self, from: payload)
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected RECENT_SEEN_RESULT")
+        }
+    }
+
+    public func removeRecentSeen(assetId: String) async throws {
+        guard let io else { throw TransferError.notConnected }
+        try await io.sendJSON(
+            type: .recentSeenRemove,
+            value: RecentSeenMarkPayload(assetId: assetId)
+        )
+        let (type, payload) = try await io.receive(timeoutNanoseconds: ArchieConstants.ioTimeoutNanoseconds)
+        switch type {
+        case .recentSeenResult:
+            _ = try MessageCodec.decode(RecentSeenPayload.self, from: payload)
+        case .fail:
+            let fail = try MessageCodec.decode(FailPayload.self, from: payload)
+            throw TransferError.rejected(fail.reason)
+        default:
+            throw TransferError.protocolError("expected RECENT_SEEN_RESULT")
+        }
+    }
+
     public func endSession() async throws {
         try await io?.send(type: .sessionEnd)
         disconnect()

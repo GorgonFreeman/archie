@@ -32,6 +32,8 @@ Deletion is available through the "Delete Verified" button at any time, or will 
 
 User has a toggle per album to "protect" photos. This means don't delete after import. Favourites is also supported as an option and is on by default. Once a protected asset (favourite or protected album) verifies on the Mac, its asset id is recorded in `.protected_seen_log` in the archive and skipped on later imports while still protected.
 
+**Protect last 30 days** (toggle at the top, default on) keeps assets newer than 30 days on the phone after a verified import. Their ids + creation dates are recorded in `.recent_seen_log`. Later imports skip re-transferring those while young, and once a recorded asset is older than 30 days it is queued for Delete Verified (no re-copy). Successful deletes (or assets already gone from the phone) remove the log entry.
+
 ## Pause
 
 The import can be paused at any time with a "Pause" button.

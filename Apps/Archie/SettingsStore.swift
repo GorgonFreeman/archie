@@ -1,9 +1,14 @@
 import Foundation
 
-/// Persists protect-favourites toggle and protected album localIdentifiers.
+/// Persists protect toggles and protected album localIdentifiers.
 final class SettingsStore: ObservableObject {
     @Published var protectFavourites: Bool {
         didSet { defaults.set(protectFavourites, forKey: Keys.protectFavourites) }
+    }
+
+    /// Keep assets newer than 30 days on the phone after import; age out on later passes.
+    @Published var protectLast30Days: Bool {
+        didSet { defaults.set(protectLast30Days, forKey: Keys.protectLast30Days) }
     }
 
     @Published var protectedAlbumIds: [String] {
@@ -18,6 +23,7 @@ final class SettingsStore: ObservableObject {
 
     private enum Keys {
         static let protectFavourites = "protectFavourites"
+        static let protectLast30Days = "protectLast30Days"
         static let protectedAlbums = "protectedAlbumIds"
         static let lastPin = "lastPin"
     }
@@ -28,6 +34,11 @@ final class SettingsStore: ObservableObject {
             protectFavourites = true
         } else {
             protectFavourites = defaults.bool(forKey: Keys.protectFavourites)
+        }
+        if defaults.object(forKey: Keys.protectLast30Days) == nil {
+            protectLast30Days = true
+        } else {
+            protectLast30Days = defaults.bool(forKey: Keys.protectLast30Days)
         }
         protectedAlbumIds = defaults.stringArray(forKey: Keys.protectedAlbums) ?? []
         lastPin = defaults.string(forKey: Keys.lastPin) ?? ""

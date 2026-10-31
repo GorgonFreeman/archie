@@ -30,6 +30,8 @@ struct RootView: View {
         NavigationStack {
             Form {
                 Section("Mac receiver") {
+                    Toggle("Protect last 30 days", isOn: $settings.protectLast30Days)
+
                     TextField("PIN", text: $pin)
                         .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
@@ -89,7 +91,7 @@ struct RootView: View {
                         )
                     }
 
-                    Text("Import copies to the Mac. Keep the app foregrounded — backgrounding pauses. If the link drops, use Reconnect. Scan leftovers verifies the archive and queues matching phone assets for Delete Verified.")
+                    Text("Import copies to the Mac. Keep the app foregrounded — backgrounding pauses. If the link drops, use Reconnect. With Protect last 30 days on, recent assets stay on the phone until they age out (then Delete Verified). Scan leftovers verifies the archive and queues matching phone assets for Delete Verified.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -131,17 +133,6 @@ struct RootView: View {
                 }
             }
             .navigationTitle("Archie")
-            .alert(item: $importer.recentMonthOffer) { offer in
-                Alert(
-                    title: Text("Reached \(offer.monthLabel)"),
-                    message: Text(
-                        "Import paused before the most recent month so you can favourite anything you still want to keep. Protected favourites/albums are skipped on delete. Continue when ready."
-                    ),
-                    dismissButton: .default(Text("Continue")) {
-                        importer.continuePastRecentMonth()
-                    }
-                )
-            }
             .task {
                 _ = await PhotoAccess.request()
                 loadAlbums()

@@ -38,6 +38,14 @@ public enum FrameType: UInt8, Sendable {
     case libraryInventoryEnd = 22
     /// Mac → Phone: inventory saved (`LibraryInventoryAckPayload`).
     case libraryInventoryAck = 23
+    /// Phone → Mac: request recent-window assetIds (protect last 30 days).
+    case recentSeenFetch = 24
+    /// Mac → Phone: `RecentSeenPayload`.
+    case recentSeenResult = 25
+    /// Phone → Mac: mark one recent-protected asset (`RecentSeenMarkPayload`).
+    case recentSeenMark = 26
+    /// Phone → Mac: drop one id after delete (`RecentSeenMarkPayload` assetId only).
+    case recentSeenRemove = 27
 }
 
 public struct HelloPayload: Codable, Sendable {
@@ -216,6 +224,34 @@ public struct LibraryInventoryAckPayload: Codable, Sendable {
     public init(assetCount: Int, path: String) {
         self.assetCount = assetCount
         self.path = path
+    }
+}
+
+public struct RecentSeenEntry: Codable, Sendable, Hashable {
+    public var assetId: String
+    public var creationDate: Date?
+
+    public init(assetId: String, creationDate: Date? = nil) {
+        self.assetId = assetId
+        self.creationDate = creationDate
+    }
+}
+
+public struct RecentSeenPayload: Codable, Sendable {
+    public var entries: [RecentSeenEntry]
+
+    public init(entries: [RecentSeenEntry]) {
+        self.entries = entries
+    }
+}
+
+public struct RecentSeenMarkPayload: Codable, Sendable {
+    public var assetId: String
+    public var creationDate: Date?
+
+    public init(assetId: String, creationDate: Date? = nil) {
+        self.assetId = assetId
+        self.creationDate = creationDate
     }
 }
 

@@ -2,6 +2,8 @@ import Foundation
 
 enum RetainReason: String, Sendable {
     case protected
+    /// Imported under "protect last 30 days" — delete once aged out.
+    case recentProtected
     case failed
     case unreadable
     case sidecarFailed

@@ -1,3 +1,4 @@
+import ArchieCore
 import Foundation
 import Photos
 import SwiftUI
@@ -21,14 +22,11 @@ final class ImportCoordinator: ObservableObject {
     @Published private(set) var leftoverReadyCount = 0
     /// Import queue + leftover queue — drives Delete Verified.
     @Published private(set) var verifiedReadyCount = 0
-    /// Soft stop before importing the newest calendar month (favorite first).
-    @Published var recentMonthOffer: RecentMonthOffer?
 
     private let settings: SettingsStore
     /// Import path: verified+settled copies waiting for Photos delete.
     private var pendingDeletes: [VerifiedCopy] = []
     private var flushTask: Task<Void, Never>?
-    private var recentMonthDecision: CheckedContinuation<Void, Never>?
     /// Leftover-scan path: archive-verified asset IDs still on the phone.
     private var leftoverReadyIds: [String] = []
     private var scanIncompleteSkipped = 0
@@ -46,11 +44,6 @@ final class ImportCoordinator: ObservableObject {
 
     init(settings: SettingsStore) {
         self.settings = settings
-    }
-
-    struct RecentMonthOffer: Identifiable {
-        let id = UUID()
-        let monthLabel: String
     }
 
     private func publishVerifiedReadyCount() {
@@ -96,10 +89,6 @@ final class ImportCoordinator: ObservableObject {
 
     func resume() {
         guard isRunning else { return }
-        if recentMonthDecision != nil {
-            continuePastRecentMonth()
-            return
-        }
         status = needsReconnect ? "Reconnecting…" : "Checking connection…"
         Task { await resumeAfterConnectionCheck() }
     }
@@ -187,17 +176,6 @@ final class ImportCoordinator: ObservableObject {
             return
         }
         Task { await flushAllVerifiedReady() }
-    }
-
-    /// Continue past the newest-month gate (after favouriting).
-    func continuePastRecentMonth() {
-        recentMonthDecision?.resume()
-        recentMonthDecision = nil
-        recentMonthOffer = nil
-        if isRunning {
-            isPaused = false
-            status = "Resuming recent month…"
-        }
     }
 
     /// Push the current phone library ID list to the Mac as a checkpoint file.
@@ -396,11 +374,32 @@ final class ImportCoordinator: ObservableObject {
             return
         }
 
+        status = "Loading recent-seen log…"
+        let recentEntries: [RecentSeenEntry]
+        do {
+            recentEntries = try await client.fetchRecentSeen()
+        } catch {
+            try? await client.endSession()
+            offerFreshReconnect("Recent-seen log failed: \(error.localizedDescription)")
+            return
+        }
+
+        let agedOutRecent = recentEntries.filter {
+            RecentSeenLog.isAgedOut(creationDate: $0.creationDate)
+        }
+        let youngRecentIds = Set(
+            recentEntries
+                .filter { RecentSeenLog.isWithinWindow(creationDate: $0.creationDate) }
+                .map(\.assetId)
+        )
+        await enqueueAgedOutRecentDeletes(entries: agedOutRecent, client: client)
+
         let protection = ProtectionPolicy(
             protectFavourites: settings.protectFavourites,
             protectedAlbumIds: Set(settings.protectedAlbumIds)
         )
         let protectedByAlbum = Self.assetIdsInProtectedAlbums(settings: settings)
+        let protectRecent = settings.protectLast30Days
 
         let opts = PHFetchOptions()
         opts.includeHiddenAssets = true
@@ -410,11 +409,16 @@ final class ImportCoordinator: ObservableObject {
 
         var assets: [PHAsset] = []
         var skippedProtectedSeen = 0
+        var skippedRecentSeen = 0
         var skippedSettled = 0
         let settledSnapshot = settledOnMac
         fetch.enumerateObjects { asset, _, _ in
             if settledSnapshot.contains(asset.localIdentifier) {
                 skippedSettled += 1
+                return
+            }
+            if youngRecentIds.contains(asset.localIdentifier) {
+                skippedRecentSeen += 1
                 return
             }
             let protectedNow = Self.isProtected(
@@ -437,6 +441,12 @@ final class ImportCoordinator: ObservableObject {
         if skippedProtectedSeen > 0 {
             skipNotes.append("\(skippedProtectedSeen) protected-seen")
         }
+        if skippedRecentSeen > 0 {
+            skipNotes.append("\(skippedRecentSeen) recent-protected")
+        }
+        if !agedOutRecent.isEmpty {
+            skipNotes.append("\(agedOutRecent.count) aged-out ready")
+        }
         if !skipNotes.isEmpty {
             status = "Skipping \(skipNotes.joined(separator: ", "))…"
         }
@@ -445,9 +455,6 @@ final class ImportCoordinator: ObservableObject {
         publishVerifiedReadyCount()
         flushTask?.cancel()
         flushTask = nil
-
-        let recentMonthStart = Self.startOfNewestMonth(in: assets)
-        var offeredRecentMonthGate = false
 
         var index = 0
         while index < assets.count {
@@ -477,23 +484,14 @@ final class ImportCoordinator: ObservableObject {
                 continue
             }
 
-            if !offeredRecentMonthGate,
-               let recentMonthStart,
-               let created = asset.creationDate,
-               created >= recentMonthStart {
-                offeredRecentMonthGate = true
-                await pauseForRecentMonth(monthStart: recentMonthStart)
-                // User may have backgrounded / lost link during the gate.
-                continue
-            }
-
             progress = index + 1
             status = "Asset \(progress)/\(total)"
             let settled = await transferAndSettle(
                 asset,
                 client: client,
                 protection: protection,
-                protectedByAlbum: protectedByAlbum
+                protectedByAlbum: protectedByAlbum,
+                protectRecent: protectRecent
             )
             if case .connectionLost = settled {
                 enterConnectionLostWait()
@@ -542,37 +540,45 @@ final class ImportCoordinator: ObservableObject {
         }
     }
 
-    /// First calendar month that contains the newest asset — pause before importing it.
-    private static func startOfNewestMonth(in assets: [PHAsset]) -> Date? {
-        guard let newest = assets.compactMap(\.creationDate).max() else { return nil }
-        let cal = Calendar.current
-        let parts = cal.dateComponents([.year, .month], from: newest)
-        return cal.date(from: parts)
-    }
-
-    private static func monthLabel(for monthStart: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMMM yyyy"
-        return formatter.string(from: monthStart)
-    }
-
-    private func pauseForRecentMonth(monthStart: Date) async {
-        let label = Self.monthLabel(for: monthStart)
-        isPaused = true
-        if !pendingDeletes.isEmpty {
-            status = "Paused — confirming delete of \(pendingDeletes.count)…"
-            await flushPendingDeletes()
+    /// Queue aged-out recent-protected assets for Delete Verified; drop log rows for assets gone from the phone.
+    private func enqueueAgedOutRecentDeletes(
+        entries: [RecentSeenEntry],
+        client: TransferClient
+    ) async {
+        guard !entries.isEmpty else { return }
+        status = "Checking \(entries.count) aged-out recent assets…"
+        let ids = entries.map(\.assetId)
+        let fetch = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+        var stillOnPhone = Set<String>()
+        fetch.enumerateObjects { asset, _, _ in
+            stillOnPhone.insert(asset.localIdentifier)
         }
-        status = "Paused — reached \(label); favourite then continue"
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            recentMonthDecision = cont
-            recentMonthOffer = RecentMonthOffer(monthLabel: label)
+        var queued = 0
+        for entry in entries {
+            if stillOnPhone.contains(entry.assetId) {
+                if !leftoverReadyIds.contains(entry.assetId) {
+                    leftoverReadyIds.append(entry.assetId)
+                    queued += 1
+                }
+            } else {
+                try? await client.removeRecentSeen(assetId: entry.assetId)
+            }
+        }
+        publishVerifiedReadyCount()
+        if queued > 0 {
+            status = "\(queued) aged-out recent assets ready to delete"
         }
     }
 
     private func clearLeftoverQueue() {
         leftoverReadyIds = []
         publishVerifiedReadyCount()
+    }
+
+    /// After a successful phone delete, drop the id from `.recent_seen_log` if present.
+    private func clearRecentSeenIfNeeded(assetId: String) async {
+        guard let client = activeClient, client.isAlive else { return }
+        try? await client.removeRecentSeen(assetId: assetId)
     }
 
     private func scheduleFlushDeletes() {
@@ -658,6 +664,7 @@ final class ImportCoordinator: ObservableObject {
                 deleted = true
                 reason = nil
                 summary.deleted += 1
+                await clearRecentSeenIfNeeded(assetId: copy.assetId)
                 if let idx = summary.outcomes.firstIndex(where: { $0.id == copy.assetId }) {
                     let prev = summary.outcomes[idx]
                     // Was previously counted as retained (e.g. user declined earlier) — undo.
@@ -671,7 +678,7 @@ final class ImportCoordinator: ObservableObject {
                 // Protected / gone-from-library should leave the delete queue.
                 // Declined / limited / failed stay so Delete Verified can retry.
                 switch r {
-                case .protected, .sidecarFailed:
+                case .protected, .recentProtected, .sidecarFailed:
                     break
                 case .deleteDeclined, .limitedAccess, .failed, .unreadable, .settleFailed:
                     keep.append(copy)
@@ -712,7 +719,8 @@ final class ImportCoordinator: ObservableObject {
         _ asset: PHAsset,
         client: TransferClient,
         protection: ProtectionPolicy,
-        protectedByAlbum: Set<String>
+        protectedByAlbum: Set<String>,
+        protectRecent: Bool
     ) async -> SettledTransfer {
         switch await transferVerified(asset, client: client) {
         case .connectionLost:
@@ -759,6 +767,30 @@ final class ImportCoordinator: ObservableObject {
                     ),
                     copy: nil
                 )
+            }
+            if protectRecent,
+               RecentSeenLog.isWithinWindow(creationDate: asset.creationDate) {
+                do {
+                    try await client.markRecentSeen(
+                        assetId: copy.assetId,
+                        creationDate: asset.creationDate
+                    )
+                    return .ok(
+                        AssetOutcome(
+                            id: copy.assetId,
+                            bytes: copy.bytes,
+                            verified: true,
+                            deleted: false,
+                            retainReason: .recentProtected
+                        ),
+                        copy: nil
+                    )
+                } catch {
+                    if Self.isConnectionLost(error) || !client.isAlive {
+                        return .connectionLost
+                    }
+                    // Could not record — fall through to normal delete queue.
+                }
             }
             // Placeholder until batch delete runs — counts as verified, not yet deleted/retained.
             return .ok(
@@ -835,6 +867,7 @@ final class ImportCoordinator: ObservableObject {
             switch results[id] {
             case .deleted:
                 deleted += 1
+                await clearRecentSeenIfNeeded(assetId: id)
             case .retained(.deleteDeclined), .retained(.limitedAccess), .retained(.failed), .none:
                 // Retryable — keep in the Delete Verified queue.
                 remaining.append(id)

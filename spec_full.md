@@ -82,7 +82,7 @@ An asset is **eligible** only if all of the following hold:
 - It is not protected, evaluated **fresh at delete time** (favourite flag and album membership re-read from PhotoKit).
 - Photos authorization is **full access**. Under limited access, the app never deletes.
 
-Eligible assets are deleted with `PHAssetChangeRequest.deleteAssets` when the user taps **Delete Verified**, **pauses**, or the import **finishes**. Import and Scan leftovers share that button; it stays inactive until something is verified and ready. On pause, Photos confirmation also runs immediately for assets already verified. Before the library’s newest calendar month, import auto-pauses so you can favourite. iOS shows one confirmation prompt per flush; that prompt cannot be suppressed. Deleted items go to Recently Deleted for 30 days.
+Eligible assets are deleted with `PHAssetChangeRequest.deleteAssets` when the user taps **Delete Verified**, **pauses**, or the import **finishes**. Import and Scan leftovers share that button; it stays inactive until something is verified and ready. On pause, Photos confirmation also runs immediately for assets already verified. **Protect last 30 days** (default on) keeps verified recent assets on the phone; they are recorded in `.recent_seen_log` and queued for Delete Verified once older than 30 days. iOS shows one confirmation prompt per flush; that prompt cannot be suppressed. Deleted items go to Recently Deleted for 30 days.
 
 **Scan leftovers** (explicit button only — not on import or launch): the Mac streams per-sidecar SHA-256 verification; the phone queues matching library assets for **Delete Verified**. Incomplete archive assets are counted and skipped. **Import** transfers only and does not scan first.
 

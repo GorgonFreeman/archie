@@ -50,6 +50,12 @@ final class SessionHandler {
                     try await sendProtectedSeen()
                 case .protectedSeenMark:
                     try await markProtectedSeen(payload)
+                case .recentSeenFetch:
+                    try await sendRecentSeen()
+                case .recentSeenMark:
+                    try await markRecentSeen(payload)
+                case .recentSeenRemove:
+                    try await removeRecentSeen(payload)
                 case .settledIdsFetch:
                     try await sendSettledIds()
                 case .libraryInventoryBegin:
@@ -206,6 +212,72 @@ final class SessionHandler {
             try await io.sendJSON(
                 type: .fail,
                 value: FailPayload(reason: "protected mark: \(error.localizedDescription)")
+            )
+        }
+    }
+
+    private func sendRecentSeen() async throws {
+        do {
+            var byId = Dictionary(
+                uniqueKeysWithValues: RecentSeenLog.load(archiveRoot: archiveRoot).map {
+                    ($0.assetId, $0)
+                }
+            )
+            if archiveRoot.standardizedFileURL != baseArchiveRoot.standardizedFileURL {
+                for entry in RecentSeenLog.load(archiveRoot: baseArchiveRoot) {
+                    if byId[entry.assetId] == nil {
+                        byId[entry.assetId] = entry
+                    }
+                }
+            }
+            let entries = byId.values.sorted { $0.assetId < $1.assetId }
+            try await io.sendJSON(
+                type: .recentSeenResult,
+                value: RecentSeenPayload(entries: entries)
+            )
+            fputs("recent seen: \(entries.count)\n", stderr)
+        } catch {
+            try await io.sendJSON(
+                type: .fail,
+                value: FailPayload(reason: "recent log: \(error.localizedDescription)")
+            )
+        }
+    }
+
+    private func markRecentSeen(_ payload: Data) async throws {
+        let request = try MessageCodec.decode(RecentSeenMarkPayload.self, from: payload)
+        do {
+            try RecentSeenLog.record(
+                assetId: request.assetId,
+                creationDate: request.creationDate,
+                archiveRoot: archiveRoot
+            )
+            try await io.sendJSON(
+                type: .recentSeenResult,
+                value: RecentSeenPayload(entries: [
+                    RecentSeenEntry(assetId: request.assetId, creationDate: request.creationDate),
+                ])
+            )
+        } catch {
+            try await io.sendJSON(
+                type: .fail,
+                value: FailPayload(reason: "recent mark: \(error.localizedDescription)")
+            )
+        }
+    }
+
+    private func removeRecentSeen(_ payload: Data) async throws {
+        let request = try MessageCodec.decode(RecentSeenMarkPayload.self, from: payload)
+        do {
+            try RecentSeenLog.remove(assetId: request.assetId, archiveRoot: archiveRoot)
+            try await io.sendJSON(
+                type: .recentSeenResult,
+                value: RecentSeenPayload(entries: [])
+            )
+        } catch {
+            try await io.sendJSON(
+                type: .fail,
+                value: FailPayload(reason: "recent remove: \(error.localizedDescription)")
             )
         }
     }
