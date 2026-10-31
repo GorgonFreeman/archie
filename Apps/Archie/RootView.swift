@@ -30,8 +30,6 @@ struct RootView: View {
         NavigationStack {
             Form {
                 Section("Mac receiver") {
-                    Toggle("Protect last 30 days", isOn: $settings.protectLast30Days)
-
                     TextField("PIN", text: $pin)
                         .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
@@ -97,6 +95,7 @@ struct RootView: View {
                 }
 
                 Section("Protection") {
+                    Toggle("Protect last 30 days", isOn: $settings.protectLast30Days)
                     Toggle("Protect favourites", isOn: $settings.protectFavourites)
                     ForEach(albums, id: \.localIdentifier) { album in
                         Toggle(album.localizedTitle ?? "Album", isOn: Binding(
